@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -91,7 +92,7 @@ fun CollageEditorScreen(
     selectedPhotos: List<String>,
     onBack: () -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(EditorTool.ADJUST) }
+    var selectedTab by remember { mutableStateOf(EditorTool.LAYOUT) }
     var currentLayoutId by remember { mutableStateOf(layoutId) }
     var aspectRatio by remember { mutableStateOf(AspectRatio.SQUARE) }
     var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
@@ -308,14 +309,16 @@ fun CollageEditorScreen(
                             }
                         }
                         EditorTool.LAYOUT -> {
+                            // Layout tab showing visual layout grid thumbnail boxes matching FunPic app screenshot
                             Column(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Select Layout", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                Text("Select Layout Grid", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                                 LazyVerticalGrid(
                                     columns = GridCells.Fixed(4),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.fillMaxWidth().height(160.dp)
                                 ) {
                                     gridItems(layouts) { layout ->
@@ -323,22 +326,19 @@ fun CollageEditorScreen(
                                         Box(
                                             modifier = Modifier
                                                 .size(64.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF1F5F9))
+                                                .shadow(3.dp, RoundedCornerShape(10.dp))
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFFFFFFF))
                                                 .border(
-                                                    width = if (isSelected) 2.dp else 1.dp,
+                                                    width = if (isSelected) 2.5.dp else 1.dp,
                                                     color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
-                                                    shape = RoundedCornerShape(8.dp)
+                                                    shape = RoundedCornerShape(10.dp)
                                                 )
                                                 .clickable { currentLayoutId = layout.id },
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = layout.name.take(6),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) Color(0xFF2563EB) else Color(0xFF1E293B)
-                                            )
+                                            // Miniature Vector Grid Thumbnail Preview matching FunPic style
+                                            LayoutThumbnailPreview(layoutId = layout.id, isSelected = isSelected)
                                         }
                                     }
                                 }
@@ -503,7 +503,6 @@ fun CollageEditorScreen(
                             }
                         }
                         EditorTool.ADJUST -> {
-                            // Adjust & Color Grading matching @12_adjust_color_grading.svg with -50 to 50 range and vertical icon+name cards
                             Column(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.SpaceBetween
@@ -525,7 +524,6 @@ fun CollageEditorScreen(
                                     )
                                 }
 
-                                // Animated horizontal list with vertical Icon + Name cards with borders, gradients, and drop shadows
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.fillMaxWidth()
@@ -966,8 +964,7 @@ fun CollageEditorScreen(
                 else -> Modifier.background(canvasBgColor)
             }
 
-            // Real visual effects for all Adjust parameters (-50 to 50 range, neutral at 0)
-            val brightnessVal = (adjustValues["Brightness"] ?: 0f) / 50f // -1f to 1f
+            val brightnessVal = (adjustValues["Brightness"] ?: 0f) / 50f
             val contrastVal = (adjustValues["Contrast"] ?: 0f) / 50f
             val highlightVal = (adjustValues["Highlight"] ?: 0f) / 50f
             val shadowVal = (adjustValues["Shadow"] ?: 0f) / 50f
@@ -984,7 +981,7 @@ fun CollageEditorScreen(
             val warmthColor = Color(0xFFFFB703).copy(alpha = maxOf(0f, warmthVal * 0.25f))
             val tintColor = Color(0xFFFB6F92).copy(alpha = maxOf(0f, tintVal * 0.25f))
 
-            // Collage Canvas Box with Comprehensive Adjust Color Grading Effects
+            // Collage Canvas Box with FunPic-style Layout Grid Thumbnails and Full Editing Suite
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.85f)
@@ -1055,7 +1052,6 @@ fun CollageEditorScreen(
                     )
                 }
 
-                // Apply comprehensive real visual effects for all adjust items
                 if (brightnessColor.alpha > 0.01f) {
                     Box(modifier = Modifier.fillMaxSize().background(brightnessColor))
                 }
@@ -1342,6 +1338,57 @@ fun CollageEditorScreen(
                     }
                 }
             )
+        }
+    }
+}
+
+@Composable
+fun LayoutThumbnailPreview(layoutId: String, isSelected: Boolean) {
+    val strokeColor = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
+    val strokeWidth = if (isSelected) 3f else 2f
+
+    Canvas(modifier = Modifier.size(44.dp)) {
+        val w = size.width
+        val h = size.height
+
+        drawRect(color = strokeColor, style = Stroke(width = strokeWidth))
+
+        when (layoutId) {
+            "layout_2_vertical" -> {
+                drawLine(color = strokeColor, start = Offset(w * 0.5f, 0f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
+            }
+            "layout_2_horizontal" -> {
+                drawLine(color = strokeColor, start = Offset(0f, h * 0.5f), end = Offset(w, h * 0.5f), strokeWidth = strokeWidth)
+            }
+            "layout_3_top" -> {
+                drawLine(color = strokeColor, start = Offset(0f, h * 0.5f), end = Offset(w, h * 0.5f), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.5f, h * 0.5f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
+            }
+            "layout_3_left" -> {
+                drawLine(color = strokeColor, start = Offset(w * 0.5f, 0f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.5f, h * 0.5f), end = Offset(w, h * 0.5f), strokeWidth = strokeWidth)
+            }
+            "layout_pinwheel" -> {
+                drawLine(color = strokeColor, start = Offset(w * 0.55f, 0f), end = Offset(w * 0.55f, h * 0.55f), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(0f, h * 0.55f), end = Offset(w * 0.55f, h * 0.55f), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.45f, h * 0.45f), end = Offset(w * 0.45f, h), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.45f, h * 0.45f), end = Offset(w, h * 0.45f), strokeWidth = strokeWidth)
+            }
+            "layout_vertical_strips" -> {
+                drawLine(color = strokeColor, start = Offset(w * 0.33f, 0f), end = Offset(w * 0.33f, h), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.67f, 0f), end = Offset(w * 0.67f, h), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.33f, h * 0.65f), end = Offset(w * 0.67f, h * 0.65f), strokeWidth = strokeWidth)
+            }
+            "layout_top_right" -> {
+                drawLine(color = strokeColor, start = Offset(w * 0.6f, 0f), end = Offset(w * 0.6f, h), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.6f, h * 0.33f), end = Offset(w, h * 0.33f), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.6f, h * 0.67f), end = Offset(w, h * 0.67f), strokeWidth = strokeWidth)
+            }
+            else -> {
+                drawLine(color = strokeColor, start = Offset(0f, h * 0.55f), end = Offset(w, h * 0.55f), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.33f, h * 0.55f), end = Offset(w * 0.33f, h), strokeWidth = strokeWidth)
+                drawLine(color = strokeColor, start = Offset(w * 0.67f, h * 0.55f), end = Offset(w * 0.67f, h), strokeWidth = strokeWidth)
+            }
         }
     }
 }
