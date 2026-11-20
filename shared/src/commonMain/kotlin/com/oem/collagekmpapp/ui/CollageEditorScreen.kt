@@ -4,12 +4,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,7 +38,7 @@ import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.model.*
 
 enum class EditorTool {
-    RATIO, LAYOUT, BORDER, FILTER, GLITTER, TEXT, BACKGROUND
+    RATIO, LAYOUT, BORDER, FILTER, GLITTER, TEXT, BACKGROUND, DRAW
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,7 +48,7 @@ fun CollageEditorScreen(
     selectedPhotos: List<String>,
     onBack: () -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(EditorTool.BORDER) }
+    var selectedTab by remember { mutableStateOf(EditorTool.DRAW) }
     var currentLayoutId by remember { mutableStateOf(layoutId) }
     var aspectRatio by remember { mutableStateOf(AspectRatio.SQUARE) }
     var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
@@ -68,6 +70,12 @@ fun CollageEditorScreen(
     var canvasBgGradient by remember { mutableStateOf<Brush?>(null) }
     var backgroundBlur by remember { mutableStateOf(40f) }
     var selectedBackgroundPhoto by remember { mutableStateOf<String?>(null) }
+
+    // Draw & Brush states matching 10_draw_brush_screen.svg
+    var selectedBrushType by remember { mutableStateOf("Neon") }
+    var brushDensity by remember { mutableStateOf(35f) }
+    var brushOpacity by remember { mutableStateOf(100f) }
+    var brushColor by remember { mutableStateOf(Color(0xFFF43F8E)) }
 
     var showExportDialog by remember { mutableStateOf(false) }
 
@@ -119,6 +127,18 @@ fun CollageEditorScreen(
         Brush.linearGradient(listOf(Color(0xFF34D399), Color(0xFF2563EB))),
         Brush.linearGradient(listOf(Color(0xFFF5D0FE), Color(0xFF93C5FD))),
         Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF7DD3FC)))
+    )
+
+    val brushTypes = listOf("Pen", "Marker", "Neon", "Eraser")
+    val brushColors = listOf(
+        Color(0xFFF43F8E),
+        Color(0xFFFFFFFF),
+        Color(0xFFFACC15),
+        Color(0xFFF97316),
+        Color(0xFFEF4444),
+        Color(0xFF3B82F6),
+        Color(0xFF22C55E),
+        Color(0xFF9333EA)
     )
 
     Scaffold(
@@ -194,7 +214,7 @@ fun CollageEditorScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth().height(160.dp)
                                 ) {
-                                    items(layouts) { layout ->
+                                    gridItems(layouts) { layout ->
                                         val isSelected = currentLayoutId == layout.id
                                         Box(
                                             modifier = Modifier
@@ -221,7 +241,6 @@ fun CollageEditorScreen(
                             }
                         }
                         EditorTool.BORDER -> {
-                            // Border Customization: Outer Spacing, Inner Spacing, Corner Radius (No border width/stroke, no border color)
                             Column(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.SpaceEvenly
@@ -424,7 +443,7 @@ fun CollageEditorScreen(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth().height(150.dp)
                                 ) {
-                                    items(fontCards) { font ->
+                                    gridItems(fontCards) { font ->
                                         val isSelected = selectedFont == font
                                         Box(
                                             modifier = Modifier
@@ -544,56 +563,132 @@ fun CollageEditorScreen(
                                 }
                             }
                         }
+                        EditorTool.DRAW -> {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Draw & Brush", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+
+                                Text("Brush Type & Eraser", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    brushTypes.forEach { type ->
+                                        val isSelected = selectedBrushType == type
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { selectedBrushType = type },
+                                            label = { Text(type) }
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Density: ${brushDensity.toInt()}%", fontSize = 11.sp)
+                                    Slider(
+                                        value = brushDensity,
+                                        onValueChange = { brushDensity = it },
+                                        valueRange = 0f..100f,
+                                        modifier = Modifier.width(160.dp).height(20.dp)
+                                    )
+                                    Text("Opacity: ${brushOpacity.toInt()}%", fontSize = 11.sp)
+                                    Slider(
+                                        value = brushOpacity,
+                                        onValueChange = { brushOpacity = it },
+                                        valueRange = 0f..100f,
+                                        modifier = Modifier.width(160.dp).height(20.dp)
+                                    )
+                                }
+
+                                Text("Brush Color", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(brushColors) { col ->
+                                        val isSelected = brushColor == col
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(CircleShape)
+                                                .background(col)
+                                                .border(
+                                                    width = if (isSelected) 2.5.dp else 1.dp,
+                                                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
+                                                    shape = CircleShape
+                                                )
+                                                .clickable { brushColor = col }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
-                // Main Unified Bottom Navigation Bar for Tools (All 7 tools)
-                NavigationBar(
-                    containerColor = Color.White,
-                    tonalElevation = 8.dp
+                // Horizontal scrollable bottom tabs list with all 8 tools including Text, Background, Draw
+                val scrollState = rememberScrollState()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White)
+                        .horizontalScroll(scrollState)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    NavigationBarItem(
-                        selected = selectedTab == EditorTool.RATIO,
-                        onClick = { selectedTab = EditorTool.RATIO },
-                        icon = { Icon(Icons.Default.Crop, contentDescription = null) },
-                        label = { Text("Ratio") }
+                    val tools = listOf(
+                        Triple(EditorTool.RATIO, "Ratio", Icons.Default.Crop),
+                        Triple(EditorTool.LAYOUT, "Layout", Icons.Default.GridView),
+                        Triple(EditorTool.BORDER, "Border", Icons.Default.Dashboard),
+                        Triple(EditorTool.FILTER, "Filter", Icons.Default.Star),
+                        Triple(EditorTool.GLITTER, "Glitter", Icons.Default.AutoAwesome),
+                        Triple(EditorTool.TEXT, "Text", null),
+                        Triple(EditorTool.BACKGROUND, "Background", Icons.Default.Wallpaper),
+                        Triple(EditorTool.DRAW, "Draw", Icons.Default.Edit)
                     )
-                    NavigationBarItem(
-                        selected = selectedTab == EditorTool.LAYOUT,
-                        onClick = { selectedTab = EditorTool.LAYOUT },
-                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
-                        label = { Text("Layout") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == EditorTool.BORDER,
-                        onClick = { selectedTab = EditorTool.BORDER },
-                        icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
-                        label = { Text("Border") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == EditorTool.FILTER,
-                        onClick = { selectedTab = EditorTool.FILTER },
-                        icon = { Icon(Icons.Default.Star, contentDescription = null) },
-                        label = { Text("Filter") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == EditorTool.GLITTER,
-                        onClick = { selectedTab = EditorTool.GLITTER },
-                        icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
-                        label = { Text("Glitter") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == EditorTool.TEXT,
-                        onClick = { selectedTab = EditorTool.TEXT },
-                        icon = { Text("Tt", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
-                        label = { Text("Text") }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == EditorTool.BACKGROUND,
-                        onClick = { selectedTab = EditorTool.BACKGROUND },
-                        icon = { Icon(Icons.Default.Wallpaper, contentDescription = null) },
-                        label = { Text("Background") }
-                    )
+
+                    tools.forEach { (tool, label, icon) ->
+                        val isSelected = selectedTab == tool
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color(0xFFEFF6FF) else Color.Transparent)
+                                .clickable { selectedTab = tool }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            if (icon != null) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            } else {
+                                Text(
+                                    text = "Tt",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = label,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -611,7 +706,6 @@ fun CollageEditorScreen(
                 else -> Modifier.background(canvasBgColor)
             }
 
-            // Canvas card with background color/gradient/photo and outer spacing (no border stroke width, no border color)
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.85f)
@@ -633,7 +727,6 @@ fun CollageEditorScreen(
                     )
                 }
 
-                // Outer spacing padding applied here
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
