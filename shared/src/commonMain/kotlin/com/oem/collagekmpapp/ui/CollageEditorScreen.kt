@@ -23,12 +23,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -39,10 +42,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.rememberGalleryPicker
 import com.oem.collagekmpapp.model.*
 
 enum class EditorTool {
-    RATIO, LAYOUT, BORDER, FILTER, ADJUST, GLITTER, TEXT, BACKGROUND, DRAW
+    RATIO, LAYOUT, BORDER, FILTER, STICKERS, ADJUST, GLITTER, TEXT, BACKGROUND, DRAW
 }
 
 data class DrawStroke(
@@ -52,6 +56,34 @@ data class DrawStroke(
     val isEraser: Boolean
 )
 
+sealed class OverlayItem {
+    abstract val id: String
+    abstract val offset: Offset
+    abstract val rotation: Float
+    abstract val scale: Float
+
+    data class Emoji(
+        override val id: String,
+        val emoji: String,
+        override val offset: Offset = Offset.Zero,
+        override val rotation: Float = 0f,
+        override val scale: Float = 1f
+    ) : OverlayItem()
+
+    data class Photo(
+        override val id: String,
+        val uri: String,
+        override val offset: Offset = Offset.Zero,
+        override val rotation: Float = 0f,
+        override val scale: Float = 1f
+    ) : OverlayItem()
+}
+
+data class AdjustOption(
+    val name: String,
+    val icon: ImageVector
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CollageEditorScreen(
@@ -59,7 +91,7 @@ fun CollageEditorScreen(
     selectedPhotos: List<String>,
     onBack: () -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(EditorTool.DRAW) }
+    var selectedTab by remember { mutableStateOf(EditorTool.ADJUST) }
     var currentLayoutId by remember { mutableStateOf(layoutId) }
     var aspectRatio by remember { mutableStateOf(AspectRatio.SQUARE) }
     var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
@@ -70,16 +102,16 @@ fun CollageEditorScreen(
     var glitterDensity by remember { mutableStateOf(65f) }
     var selectedGlitterCard by remember { mutableStateOf("Flare 2") }
 
-    // Color Grading / Adjust states matching 12_adjust_color_grading.svg
+    // Color Grading / Adjust states with -50 to 50 range and neutral at 0
     var selectedAdjustItem by remember { mutableStateOf("Brightness") }
     var adjustValues by remember { mutableStateOf(mapOf(
-        "Brightness" to 50f,
-        "Contrast" to 50f,
-        "Highlight" to 50f,
-        "Shadow" to 50f,
-        "Saturation" to 50f,
-        "Warmth" to 50f,
-        "Tint" to 50f,
+        "Brightness" to 0f,
+        "Contrast" to 0f,
+        "Highlight" to 0f,
+        "Shadow" to 0f,
+        "Saturation" to 0f,
+        "Warmth" to 0f,
+        "Tint" to 0f,
         "Fade" to 0f
     )) }
 
@@ -105,6 +137,24 @@ fun CollageEditorScreen(
     // Live drawing strokes list
     var drawStrokes by remember { mutableStateOf(listOf<DrawStroke>()) }
     var currentStrokePoints by remember { mutableStateOf(listOf<Offset>()) }
+
+    // Stickers overlay items list (emojis and gallery photo stickers)
+    var overlayItems by remember { mutableStateOf(listOf<OverlayItem>()) }
+    var selectedOverlayId by remember { mutableStateOf<String?>(null) }
+
+    val photoStickerPicker = rememberGalleryPicker { selectedUris ->
+        if (selectedUris.isNotEmpty()) {
+            val newItem = OverlayItem.Photo(
+                id = "photo_${kotlin.random.Random.nextLong()}",
+                uri = selectedUris[0],
+                offset = Offset.Zero,
+                rotation = 0f,
+                scale = 1f
+            )
+            overlayItems = overlayItems + newItem
+            selectedOverlayId = newItem.id
+        }
+    }
 
     var showExportDialog by remember { mutableStateOf(false) }
 
@@ -136,7 +186,19 @@ fun CollageEditorScreen(
     val glitterCategories = listOf("Sparkle", "Bokeh", "Stardust", "Light Leak", "Neon")
     val glitterCards = listOf("Glitz", "Spark 1", "Flare 2", "Dust")
     val fontCards = listOf("Modern", "Script", "Bold", "Retro", "Serif", "Neon")
-    val adjustItems = listOf("Brightness", "Contrast", "Highlight", "Shadow", "Saturation", "Warmth", "Tint", "Fade")
+
+    val adjustOptions = listOf(
+        AdjustOption("Brightness", Icons.Default.WbSunny),
+        AdjustOption("Contrast", Icons.Default.Contrast),
+        AdjustOption("Highlight", Icons.Default.LightMode),
+        AdjustOption("Shadow", Icons.Default.Brightness2),
+        AdjustOption("Saturation", Icons.Default.Palette),
+        AdjustOption("Warmth", Icons.Default.WbIncandescent),
+        AdjustOption("Tint", Icons.Default.Gradient),
+        AdjustOption("Fade", Icons.Default.BlurOn)
+    )
+
+    val emojis = listOf("😍", "😎", "🔥", "✨", "🥳", "👑", "🌈", "⭐", "🦋")
 
     val solidColors = listOf(
         Color(0xFFFFFFFF),
@@ -209,7 +271,7 @@ fun CollageEditorScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(230.dp)
                         .background(Color(0xFFF8FAFC))
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
@@ -382,41 +444,134 @@ fun CollageEditorScreen(
                                 }
                             }
                         }
-                        EditorTool.ADJUST -> {
+                        EditorTool.STICKERS -> {
                             Column(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Adjust & Color Grading", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                Text("Stickers & Emojis", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
-                                val currentValue = adjustValues[selectedAdjustItem] ?: 50f
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(64.dp)
+                                                .height(72.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color(0xFFEFF6FF))
+                                                .border(1.5.dp, Color(0xFF2563EB), RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    photoStickerPicker.launch()
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                                                Text("Photo", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                                            }
+                                        }
+                                    }
+
+                                    items(emojis) { emoji ->
+                                        Box(
+                                            modifier = Modifier
+                                                .width(64.dp)
+                                                .height(72.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color(0xFFF8FAFC))
+                                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    val newItem = OverlayItem.Emoji(
+                                                        id = "emoji_${kotlin.random.Random.nextLong()}",
+                                                        emoji = emoji,
+                                                        offset = Offset.Zero,
+                                                        rotation = 0f,
+                                                        scale = 1f
+                                                    )
+                                                    overlayItems = overlayItems + newItem
+                                                    selectedOverlayId = newItem.id
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(emoji, fontSize = 28.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        EditorTool.ADJUST -> {
+                            // Adjust & Color Grading matching @12_adjust_color_grading.svg with -50 to 50 range and vertical icon+name cards
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                val currentValue = adjustValues[selectedAdjustItem] ?: 0f
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("$selectedAdjustItem: ${currentValue.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
+                                    Text("$selectedAdjustItem: ${if (currentValue > 0) "+" else ""}${currentValue.toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                                     Slider(
                                         value = currentValue,
                                         onValueChange = { newVal ->
                                             adjustValues = adjustValues + (selectedAdjustItem to newVal)
                                         },
-                                        valueRange = 0f..100f,
+                                        valueRange = -50f..50f,
                                         modifier = Modifier.width(240.dp).height(20.dp)
                                     )
                                 }
 
+                                // Animated horizontal list with vertical Icon + Name cards with borders, gradients, and drop shadows
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    items(adjustItems) { item ->
-                                        val isSelected = selectedAdjustItem == item
-                                        FilterChip(
-                                            selected = isSelected,
-                                            onClick = { selectedAdjustItem = item },
-                                            label = { Text(item) }
-                                        )
+                                    items(adjustOptions) { option ->
+                                        val isSelected = selectedAdjustItem == option.name
+                                        Box(
+                                            modifier = Modifier
+                                                .width(72.dp)
+                                                .height(68.dp)
+                                                .shadow(4.dp, RoundedCornerShape(12.dp))
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(
+                                                    if (isSelected) {
+                                                        Brush.verticalGradient(listOf(Color(0xFFEFF6FF), Color(0xFFDBEAFE)))
+                                                    } else {
+                                                        Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF8FAFC)))
+                                                    }
+                                                )
+                                                .border(
+                                                    width = if (isSelected) 2.dp else 1.dp,
+                                                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
+                                                    shape = RoundedCornerShape(12.dp)
+                                                )
+                                                .clickable { selectedAdjustItem = option.name },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = option.icon,
+                                                    contentDescription = option.name,
+                                                    tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF475569),
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = option.name,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFF334155)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -518,7 +673,6 @@ fun CollageEditorScreen(
                                     )
                                 }
 
-                                // Text Color Palette List as requested
                                 Text("Text Color", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -557,7 +711,7 @@ fun CollageEditorScreen(
                                                 .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF8FAFC))
                                                 .border(
                                                     width = if (isSelected) 2.dp else 1.dp,
-                                                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
+                                                    color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFFCBD5E1),
                                                     shape = RoundedCornerShape(8.dp)
                                                 )
                                                 .clickable { selectedFont = font },
@@ -737,7 +891,7 @@ fun CollageEditorScreen(
                     }
                 }
 
-                // Horizontal scrollable bottom tabs list with ALL 9 tools (Ratio, Layout, Border, Filter, Adjust, Glitter, Text, Background, Draw)
+                // Horizontal scrollable bottom tabs list with ALL 10 tools
                 val scrollState = rememberScrollState()
                 Row(
                     modifier = Modifier
@@ -753,6 +907,7 @@ fun CollageEditorScreen(
                         Triple(EditorTool.LAYOUT, "Layout", Icons.Default.GridView),
                         Triple(EditorTool.BORDER, "Border", Icons.Default.Dashboard),
                         Triple(EditorTool.FILTER, "Filter", Icons.Default.Star),
+                        Triple(EditorTool.STICKERS, "Stickers", Icons.Default.EmojiEmotions),
                         Triple(EditorTool.ADJUST, "Adjust", Icons.Default.Tune),
                         Triple(EditorTool.GLITTER, "Glitter", Icons.Default.AutoAwesome),
                         Triple(EditorTool.TEXT, "Text", null),
@@ -811,16 +966,32 @@ fun CollageEditorScreen(
                 else -> Modifier.background(canvasBgColor)
             }
 
-            val fadeVal = 1f - ((adjustValues["Fade"] ?: 0f) / 100f * 0.3f)
+            // Real visual effects for all Adjust parameters (-50 to 50 range, neutral at 0)
+            val brightnessVal = (adjustValues["Brightness"] ?: 0f) / 50f // -1f to 1f
+            val contrastVal = (adjustValues["Contrast"] ?: 0f) / 50f
+            val highlightVal = (adjustValues["Highlight"] ?: 0f) / 50f
+            val shadowVal = (adjustValues["Shadow"] ?: 0f) / 50f
+            val saturationVal = (adjustValues["Saturation"] ?: 0f) / 50f
+            val warmthVal = (adjustValues["Warmth"] ?: 0f) / 50f
+            val tintVal = (adjustValues["Tint"] ?: 0f) / 50f
+            val fadeVal = 1f - ((adjustValues["Fade"] ?: 0f) + 50f) / 100f * 0.3f
 
-            // Collage Canvas Box with Drawing (showing strokes on image) & Text overlay
+            val brightnessColor = if (brightnessVal > 0f) Color.White.copy(alpha = brightnessVal * 0.35f) else Color.Black.copy(alpha = -brightnessVal * 0.35f)
+            val contrastColor = if (contrastVal > 0f) Color.Black.copy(alpha = contrastVal * 0.2f) else Color.White.copy(alpha = -contrastVal * 0.2f)
+            val highlightColor = Color.White.copy(alpha = maxOf(0f, highlightVal * 0.25f))
+            val shadowColor = Color.Black.copy(alpha = maxOf(0f, -shadowVal * 0.25f))
+            val saturationAlpha = if (saturationVal < 0f) -saturationVal * 0.5f else 0f
+            val warmthColor = Color(0xFFFFB703).copy(alpha = maxOf(0f, warmthVal * 0.25f))
+            val tintColor = Color(0xFFFB6F92).copy(alpha = maxOf(0f, tintVal * 0.25f))
+
+            // Collage Canvas Box with Comprehensive Adjust Color Grading Effects
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.85f)
                     .aspectRatio(aspectRatio.widthRatio / aspectRatio.heightRatio)
                     .clip(RoundedCornerShape(borderSettings.cornerRadius.dp))
                     .then(bgModifier)
-                    .alpha(fadeVal.coerceIn(0.5f, 1f))
+                    .alpha(fadeVal.coerceIn(0.4f, 1f))
                     .pointerInput(selectedTab, selectedBrushType, brushColor, brushDensity) {
                         if (selectedTab == EditorTool.DRAW) {
                             detectDragGestures(
@@ -884,7 +1055,30 @@ fun CollageEditorScreen(
                     )
                 }
 
-                // Render Drawing Canvas Overlay over image so drawings show up!
+                // Apply comprehensive real visual effects for all adjust items
+                if (brightnessColor.alpha > 0.01f) {
+                    Box(modifier = Modifier.fillMaxSize().background(brightnessColor))
+                }
+                if (contrastColor.alpha > 0.01f) {
+                    Box(modifier = Modifier.fillMaxSize().background(contrastColor))
+                }
+                if (highlightColor.alpha > 0.01f) {
+                    Box(modifier = Modifier.fillMaxSize().background(highlightColor))
+                }
+                if (shadowColor.alpha > 0.01f) {
+                    Box(modifier = Modifier.fillMaxSize().background(shadowColor))
+                }
+                if (saturationAlpha > 0.01f) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Gray.copy(alpha = saturationAlpha)))
+                }
+                if (warmthColor.alpha > 0.01f) {
+                    Box(modifier = Modifier.fillMaxSize().background(warmthColor))
+                }
+                if (tintColor.alpha > 0.01f) {
+                    Box(modifier = Modifier.fillMaxSize().background(tintColor))
+                }
+
+                // Render Drawing Canvas Overlay
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     drawStrokes.forEach { stroke ->
                         if (stroke.points.size > 1) {
@@ -928,6 +1122,149 @@ fun CollageEditorScreen(
                     }
                 }
 
+                // Render Movable Sticker Overlays with Delete (X), Rotate (🔄), and Enlarge (⤢ with zoom in/out drag gesture)
+                overlayItems.forEach { item ->
+                    var itemOffset by remember(item.id) { mutableStateOf(item.offset) }
+                    var itemRotation by remember(item.id) { mutableStateOf(item.rotation) }
+                    var itemScale by remember(item.id) { mutableStateOf(item.scale) }
+                    val isSelected = selectedOverlayId == item.id
+
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .offset { IntOffset(itemOffset.x.toInt(), itemOffset.y.toInt()) }
+                            .rotate(itemRotation)
+                            .scale(itemScale)
+                            .pointerInput(item.id) {
+                                detectDragGestures { _, dragAmount ->
+                                    selectedOverlayId = item.id
+                                    itemOffset += dragAmount
+                                    overlayItems = overlayItems.map {
+                                        if (it.id == item.id) {
+                                            when (it) {
+                                                is OverlayItem.Emoji -> it.copy(offset = itemOffset)
+                                                is OverlayItem.Photo -> it.copy(offset = itemOffset)
+                                            }
+                                        } else it
+                                    }
+                                }
+                            }
+                            .clickable { selectedOverlayId = item.id }
+                            .border(
+                                width = if (isSelected) 1.5.dp else 0.dp,
+                                color = if (isSelected) Color(0xFF2563EB) else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            when (item) {
+                                is OverlayItem.Emoji -> {
+                                    Text(text = item.emoji, fontSize = 36.sp)
+                                }
+                                is OverlayItem.Photo -> {
+                                    AsyncImage(
+                                        model = item.uri,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(80.dp).clip(RoundedCornerShape(6.dp))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Delete / Close Icon (Top-Right)
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 8.dp, y = (-8).dp)
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFEF4444))
+                                    .clickable {
+                                        overlayItems = overlayItems.filter { it.id != item.id }
+                                        if (selectedOverlayId == item.id) selectedOverlayId = null
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Delete",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+
+                            // Rotate Icon (Top-Left)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset(x = (-8).dp, y = (-8).dp)
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2563EB))
+                                    .clickable {
+                                        itemRotation = (itemRotation + 15f) % 360f
+                                        overlayItems = overlayItems.map {
+                                            if (it.id == item.id) {
+                                                when (it) {
+                                                    is OverlayItem.Emoji -> it.copy(rotation = itemRotation)
+                                                    is OverlayItem.Photo -> it.copy(rotation = itemRotation)
+                                                }
+                                            } else it
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Rotate",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+
+                            // Enlarge / Scale Handle with drag gesture for zoomIn/zoomOut (Bottom-Right)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .offset(x = 12.dp, y = 12.dp)
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF22C55E))
+                                    .pointerInput(item.id) {
+                                        detectDragGestures { _, dragAmount ->
+                                            val scaleDelta = (dragAmount.x + dragAmount.y) * 0.005f
+                                            itemScale = (itemScale + scaleDelta).coerceIn(0.4f, 3.5f)
+                                            overlayItems = overlayItems.map {
+                                                if (it.id == item.id) {
+                                                    when (it) {
+                                                        is OverlayItem.Emoji -> it.copy(scale = itemScale)
+                                                        is OverlayItem.Photo -> it.copy(scale = itemScale)
+                                                    }
+                                                } else it
+                                            }
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.OpenInFull,
+                                    contentDescription = "Enlarge / Scale",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Render Movable Text Sticker
                 if (collageText.isNotBlank()) {
                     val fontStyle = when (selectedFont) {
                         "Script" -> TextStyle(fontStyle = FontStyle.Italic, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = textColor)
