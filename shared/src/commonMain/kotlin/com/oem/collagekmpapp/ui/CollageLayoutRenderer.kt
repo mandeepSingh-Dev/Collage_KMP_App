@@ -86,7 +86,7 @@ fun CollageImageSlot(
     glitterCard: String,
     glitterDensity: Float,
     isDrawingMode: Boolean = false,
-    modifier: Modifier
+    modifier: Modifier = Modifier
 ) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -124,6 +124,26 @@ fun CollageImageSlot(
         // Filter tint
         val alpha = (filterIntensity / 100f) * 0.45f
         val tint = when (filterPreset) {
+            "Clarendon" -> Color(0xFF38BDF8)
+            "Gingham" -> Color(0xFFF1F5F9)
+            "Moon" -> Color(0xFF94A3B8)
+            "Lark" -> Color(0xFFFDE047)
+            "Reyes" -> Color(0xFFFED7AA)
+            "Juno" -> Color(0xFF60A5FA)
+            "Slumber" -> Color(0xFFCBD5E1)
+            "Crema" -> Color(0xFFFEF08A)
+            "Ludwig" -> Color(0xFFFCA5A5)
+            "Aden" -> Color(0xFFF472B6)
+            "Perpetua" -> Color(0xFF34D399)
+            "Amaro" -> Color(0xFFFCD34D)
+            "Mayfair" -> Color(0xFFFBCFE8)
+            "Rise" -> Color(0xFFFDE68A)
+            "Hudson" -> Color(0xFF93C5FD)
+            "Valencia" -> Color(0xFFFDBA74)
+            "X-Pro II" -> Color(0xFF818CF8)
+            "Sierra" -> Color(0xFFD8B4FE)
+            "Willow" -> Color(0xFFE2E8F0)
+            "Lo-fi" -> Color(0xFFF43F5E)
             "Vivid" -> Color(0xFFE11D48)
             "Golden" -> Color(0xFFF59E0B)
             "Retro" -> Color(0xFF9A3412)

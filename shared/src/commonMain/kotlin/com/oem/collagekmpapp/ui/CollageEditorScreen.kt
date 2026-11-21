@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import com.oem.collagekmpapp.model.FilterRepository
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -171,7 +172,7 @@ fun CollageEditorScreen(
         }
     }
 
-    val filterPresets = listOf("Original", "Vivid", "Golden", "Retro", "Soft", "Moody")
+    val filterPresets = FilterRepository.presets
     val glitterCategories = listOf("Sparkle", "Bokeh", "Stardust", "Light Leak", "Neon")
     val glitterCards = listOf("Glitz", "Spark 1", "Flare 2", "Dust")
     val fontCards = listOf("Modern", "Script", "Bold", "Retro", "Serif", "Neon")
@@ -190,14 +191,15 @@ fun CollageEditorScreen(
     val emojis = listOf("😍", "😎", "🔥", "✨", "🥳", "👑", "🌈", "⭐", "🦋")
 
     val sharedColors = listOf(
-        Color(0xFFFFFFFF), Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0), Color(0xFFCBD5E1), Color(0xFF94A3B8), Color(0xFF64748B), Color(0xFF475569), Color(0xFF334155), Color(0xFF1E293B), Color(0xFF0F172A),
-        Color(0xFFEF4444), Color(0xFFF87171), Color(0xFFDC2626), Color(0xFFB91C1C), Color(0xFF991B1B),
-        Color(0xFFF97316), Color(0xFFFB923C), Color(0xFFEA580C), Color(0xFFC2410C), Color(0xFF9A3412),
-        Color(0xFFFACC15), Color(0xFFFDE047), Color(0xFFEAB308), Color(0xFFCA8A04), Color(0xFFA16207),
-        Color(0xFF22C55E), Color(0xFF4ADE80), Color(0xFF16A34A), Color(0xFF15803D), Color(0xFF166534),
-        Color(0xFF06B6D4), Color(0xFF22D3EE), Color(0xFF0891B2), Color(0xFF0E7490), Color(0xFF155E75),
-        Color(0xFF3B82F6), Color(0xFF60A5FA), Color(0xFF2563EB), Color(0xFF1D4ED8), Color(0xFF1E40AF),
-        Color(0xFF9333EA), Color(0xFFA855F7), Color(0xFF7E22CE), Color(0xFFEC4899), Color(0xFFF43F5E), Color(0xFFBE185D)
+        Color(0xFFFFFFFF), Color(0xFF0F172A), Color(0xFFEF4444), Color(0xFFF97316), Color(0xFFFACC15), Color(0xFF22C55E), Color(0xFF06B6D4), Color(0xFF3B82F6), Color(0xFF9333EA), Color(0xFFEC4899),
+        Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0), Color(0xFFCBD5E1), Color(0xFF94A3B8), Color(0xFF64748B), Color(0xFF475569), Color(0xFF334155), Color(0xFF1E293B),
+        Color(0xFFF87171), Color(0xFFDC2626), Color(0xFFB91C1C), Color(0xFF991B1B),
+        Color(0xFFFB923C), Color(0xFFEA580C), Color(0xFFC2410C), Color(0xFF9A3412),
+        Color(0xFFFDE047), Color(0xFFEAB308), Color(0xFFCA8A04), Color(0xFFA16207),
+        Color(0xFF4ADE80), Color(0xFF16A34A), Color(0xFF15803D), Color(0xFF166534),
+        Color(0xFF22D3EE), Color(0xFF0891B2), Color(0xFF0E7490), Color(0xFF155E75),
+        Color(0xFF60A5FA), Color(0xFF2563EB), Color(0xFF1D4ED8), Color(0xFF1E40AF),
+        Color(0xFFA855F7), Color(0xFF7E22CE), Color(0xFFF43F5E), Color(0xFFBE185D)
     )
 
     val solidColors = sharedColors
@@ -210,7 +212,26 @@ fun CollageEditorScreen(
         Brush.linearGradient(listOf(Color(0xFFFB923C), Color(0xFFF472B6), Color(0xFF38BDF8))),
         Brush.linearGradient(listOf(Color(0xFF34D399), Color(0xFF2563EB))),
         Brush.linearGradient(listOf(Color(0xFFF5D0FE), Color(0xFF93C5FD))),
-        Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF7DD3FC)))
+        Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF7DD3FC))),
+        Brush.linearGradient(listOf(Color(0xFFFF007F), Color(0xFFFF758C), Color(0xFFFF7EB3))),
+        Brush.linearGradient(listOf(Color(0xFF651FFF), Color(0xFF00E5FF))),
+        Brush.linearGradient(listOf(Color(0xFFFF9100), Color(0xFFFFEA00))),
+        Brush.linearGradient(listOf(Color(0xFF00E676), Color(0xFF1DE9B6))),
+        Brush.linearGradient(listOf(Color(0xFFF50057), Color(0xFFFF4081))),
+        Brush.linearGradient(listOf(Color(0xFF3D5AFE), Color(0xFF2F80ED))),
+        Brush.linearGradient(listOf(Color(0xFFFF3D00), Color(0xFFFF9100))),
+        Brush.linearGradient(listOf(Color(0xFF1A237E), Color(0xFF3949AB))),
+        Brush.linearGradient(listOf(Color(0xFF004D40), Color(0xFF00897B))),
+        Brush.linearGradient(listOf(Color(0xFFB71C1C), Color(0xFFD32F2F))),
+        Brush.linearGradient(listOf(Color(0xFF4A148C), Color(0xFF7B1FA2))),
+        Brush.linearGradient(listOf(Color(0xFF880E4F), Color(0xFFC2185B))),
+        Brush.linearGradient(listOf(Color(0xFF0D47A1), Color(0xFF1976D2))),
+        Brush.linearGradient(listOf(Color(0xFF006064), Color(0xFF00ACC1))),
+        Brush.linearGradient(listOf(Color(0xFF33691E), Color(0xFF689F38))),
+        Brush.linearGradient(listOf(Color(0xFFE65100), Color(0xFFF57C00))),
+        Brush.linearGradient(listOf(Color(0xFF3E2723), Color(0xFF5D4037))),
+        Brush.linearGradient(listOf(Color(0xFF263238), Color(0xFF455A64))),
+        Brush.linearGradient(listOf(Color(0xFFFF8A80), Color(0xFFFF80AB)))
     )
 
     val brushTypes = listOf("Pen", "Eraser")
@@ -407,7 +428,10 @@ fun CollageEditorScreen(
                                         val isSelected = selectedPreset == preset
                                         Column(
                                             horizontalAlignment = Alignment.CenterHorizontally,
-                                            modifier = Modifier.clickable { selectedPreset = preset }
+                                            modifier = Modifier.clickable {
+                                                selectedPreset = preset
+                                                filterIntensity = 50f
+                                            }
                                         ) {
                                             Box(
                                                 modifier = Modifier
@@ -742,6 +766,7 @@ fun CollageEditorScreen(
                                                     canvasBgColor = color
                                                     canvasBgGradient = null
                                                     selectedBackgroundPhoto = null
+                                                    backgroundFade = 0f
                                                 }
                                         )
                                     }
@@ -762,6 +787,7 @@ fun CollageEditorScreen(
                                                 .clickable {
                                                     canvasBgGradient = grad
                                                     selectedBackgroundPhoto = null
+                                                    backgroundFade = 0f
                                                 }
                                         )
                                     }
@@ -796,6 +822,7 @@ fun CollageEditorScreen(
                                                 )
                                                 .clickable {
                                                     selectedBackgroundPhoto = photoUri
+                                                    backgroundFade = 0f
                                                 }
                                         ) {
                                             AsyncImage(
