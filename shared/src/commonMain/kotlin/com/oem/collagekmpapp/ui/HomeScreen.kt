@@ -157,7 +157,7 @@ fun HomeScreen(
 
             // Grid of Feature Cards (2 columns)
             val features = listOf(
-                FeatureItem("Grid Collage", "Up to 20 photos", Icons.Default.GridOn, listOf(Color(0xFF3B82F6), Color(0xFF0EA5E9))) {
+                FeatureItem("Grid Collage", "Up to 50 photos", Icons.Default.GridOn, listOf(Color(0xFF3B82F6), Color(0xFF0EA5E9))) {
                     galleryPicker.launch()
                 },
                 FeatureItem("Freestyle", "Unleash creativity", Icons.Default.Brush, listOf(Color(0xFF8B5CF6), Color(0xFFA855F7))) {
