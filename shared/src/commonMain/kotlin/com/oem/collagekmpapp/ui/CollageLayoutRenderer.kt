@@ -30,6 +30,7 @@ fun RenderCollageLayout(
     filterIntensity: Float,
     glitterCard: String,
     glitterDensity: Float,
+    isDrawingMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier = modifier) {
@@ -67,6 +68,7 @@ fun RenderCollageLayout(
                         filterIntensity = filterIntensity,
                         glitterCard = glitterCard,
                         glitterDensity = glitterDensity,
+                        isDrawingMode = isDrawingMode,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -83,22 +85,28 @@ fun CollageImageSlot(
     filterIntensity: Float,
     glitterCard: String,
     glitterDensity: Float,
+    isDrawingMode: Boolean = false,
     modifier: Modifier
 ) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(Color(0xFFCBD5E1))
-            .pointerInput(uri) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(0.5f, 4f)
-                    offset += pan
-                }
+    val boxModifier = modifier
+        .clip(RoundedCornerShape(cornerRadius))
+        .background(Color(0xFFCBD5E1))
+
+    val finalModifier = if (!isDrawingMode) {
+        boxModifier.pointerInput(uri) {
+            detectTransformGestures { _, pan, zoom, _ ->
+                scale = (scale * zoom).coerceIn(0.5f, 4f)
+                offset += pan
             }
-    ) {
+        }
+    } else {
+        boxModifier
+    }
+
+    Box(modifier = finalModifier) {
         AsyncImage(
             model = uri,
             contentDescription = null,

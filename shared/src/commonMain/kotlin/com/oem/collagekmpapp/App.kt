@@ -22,8 +22,9 @@ fun App() {
                 )
             }
             is Screen.LayoutSelection -> {
-                // Directly open the unified Collage Editor Studio with default layout
-                currentScreen = Screen.Editor("layout_2_vertical", screen.selectedPhotos)
+                val count = screen.selectedPhotos.size.coerceAtLeast(1)
+                val defaultLayoutId = com.oem.collagekmpapp.data.LayoutRepository().getLayouts(count).firstOrNull()?.id ?: "layout_2_vertical"
+                currentScreen = Screen.Editor(defaultLayoutId, screen.selectedPhotos)
             }
             is Screen.Editor -> {
                 CollageEditorScreen(

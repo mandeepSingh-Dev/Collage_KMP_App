@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberGalleryPicker
 import com.oem.collagekmpapp.model.*
 
@@ -98,8 +100,8 @@ fun CollageEditorScreen(
     var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
 
     // Filter & Glitter states
-    var filterIntensity by remember { mutableStateOf(75f) }
-    var selectedPreset by remember { mutableStateOf("Golden") }
+    var filterIntensity by remember { mutableStateOf(50f) }
+    var selectedPreset by remember { mutableStateOf("Original") }
     var glitterDensity by remember { mutableStateOf(65f) }
     var selectedGlitterCard by remember { mutableStateOf("Flare 2") }
 
@@ -126,7 +128,7 @@ fun CollageEditorScreen(
     // Background settings states matching 09_background_settings_screen.svg
     var canvasBgColor by remember { mutableStateOf<Color>(Color(0xFFF8FAFC)) }
     var canvasBgGradient by remember { mutableStateOf<Brush?>(null) }
-    var backgroundBlur by remember { mutableStateOf(40f) }
+    var backgroundFade by remember { mutableStateOf(0f) }
     var selectedBackgroundPhoto by remember { mutableStateOf<String?>(null) }
 
     // Draw & Brush states matching 10_draw_brush_screen.svg
@@ -335,61 +337,61 @@ fun CollageEditorScreen(
                             ) {
                                 Text("Border & Spacing", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Outer Spacing: ${borderSettings.outerSpacing.toInt()}px", fontSize = 11.sp)
-                                    Slider(
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text("Outer Spacing: ${borderSettings.outerSpacing.toInt()}px", fontSize = 11.sp, color = Color(0xFF334155))
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
                                         value = borderSettings.outerSpacing,
                                         onValueChange = { borderSettings = borderSettings.copy(outerSpacing = it) },
                                         valueRange = 0f..30f,
-                                        modifier = Modifier.width(180.dp).height(20.dp)
-                                    )
-                                    Text("Inner Spacing: ${borderSettings.spacing.toInt()}px", fontSize = 11.sp)
-                                    Slider(
-                                        value = borderSettings.spacing,
-                                        onValueChange = { borderSettings = borderSettings.copy(spacing = it) },
-                                        valueRange = 0f..20f,
-                                        modifier = Modifier.width(180.dp).height(20.dp)
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Corner Radius: ${borderSettings.cornerRadius.toInt()}px", fontSize = 11.sp)
-                                    Slider(
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text("Inner Spacing: ${borderSettings.spacing.toInt()}px", fontSize = 11.sp, color = Color(0xFF334155))
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
+                                        value = borderSettings.spacing,
+                                        onValueChange = { borderSettings = borderSettings.copy(spacing = it) },
+                                        valueRange = 0f..20f,
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                                    )
+                                }
+
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text("Corner Radius: ${borderSettings.cornerRadius.toInt()}px", fontSize = 11.sp, color = Color(0xFF334155))
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
                                         value = borderSettings.cornerRadius,
                                         onValueChange = { borderSettings = borderSettings.copy(cornerRadius = it) },
                                         valueRange = 0f..40f,
-                                        modifier = Modifier.width(220.dp).height(20.dp)
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
                                 }
                             }
                         }
                         EditorTool.FILTER -> {
                             Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Text("Filters", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Intensity", fontSize = 12.sp, color = Color(0xFF334155))
-                                    Slider(
-                                        value = filterIntensity,
-                                        onValueChange = { filterIntensity = it },
-                                        valueRange = 0f..100f,
-                                        modifier = Modifier.width(260.dp).height(20.dp)
-                                    )
+                                if (selectedPreset != "Original") {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Text("Intensity: ${filterIntensity.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        FluidSlider(
+                                            value = filterIntensity,
+                                            onValueChange = { filterIntensity = it },
+                                            valueRange = 0f..100f,
+                                            modifier = Modifier.fillMaxWidth().height(36.dp)
+                                        )
+                                    }
                                 }
 
                                 LazyRow(
@@ -577,17 +579,14 @@ fun CollageEditorScreen(
                                     }
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Density", fontSize = 12.sp, color = Color(0xFF334155))
-                                    Slider(
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text("Density: ${glitterDensity.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
                                         value = glitterDensity,
                                         onValueChange = { glitterDensity = it },
                                         valueRange = 0f..100f,
-                                        modifier = Modifier.width(260.dp).height(20.dp)
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
                                 }
 
@@ -677,6 +676,7 @@ fun CollageEditorScreen(
                                     }
                                 }
 
+                                val hasText = collageText.isNotBlank()
                                 LazyVerticalGrid(
                                     columns = GridCells.Fixed(3),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -689,6 +689,7 @@ fun CollageEditorScreen(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .height(36.dp)
+                                                .alpha(if (hasText) 1f else 0.4f)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF8FAFC))
                                                 .border(
@@ -696,7 +697,7 @@ fun CollageEditorScreen(
                                                     color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFFCBD5E1),
                                                     shape = RoundedCornerShape(8.dp)
                                                 )
-                                                .clickable { selectedFont = font },
+                                                .clickable(enabled = hasText) { selectedFont = font },
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
@@ -712,8 +713,11 @@ fun CollageEditorScreen(
                         }
                         EditorTool.BACKGROUND -> {
                             Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Text("Background", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
@@ -758,17 +762,14 @@ fun CollageEditorScreen(
                                     }
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Blur Effect: ${backgroundBlur.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
-                                    Slider(
-                                        value = backgroundBlur,
-                                        onValueChange = { backgroundBlur = it },
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text("Fade Effect: ${backgroundFade.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
+                                        value = backgroundFade,
+                                        onValueChange = { backgroundFade = it },
                                         valueRange = 0f..100f,
-                                        modifier = Modifier.width(220.dp).height(20.dp)
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
                                 }
 
@@ -826,24 +827,25 @@ fun CollageEditorScreen(
                                     }
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Density: ${brushDensity.toInt()}%", fontSize = 11.sp)
-                                    Slider(
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text("Density: ${brushDensity.toInt()}%", fontSize = 11.sp, color = Color(0xFF334155))
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
                                         value = brushDensity,
                                         onValueChange = { brushDensity = it },
                                         valueRange = 0f..100f,
-                                        modifier = Modifier.width(160.dp).height(20.dp)
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
-                                    Text("Opacity: ${brushOpacity.toInt()}%", fontSize = 11.sp)
-                                    Slider(
+                                }
+
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text("Opacity: ${brushOpacity.toInt()}%", fontSize = 11.sp, color = Color(0xFF334155))
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
                                         value = brushOpacity,
                                         onValueChange = { brushOpacity = it },
                                         valueRange = 0f..100f,
-                                        modifier = Modifier.width(160.dp).height(20.dp)
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
                                 }
 
@@ -1014,7 +1016,7 @@ fun CollageEditorScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = (backgroundBlur / 100f) * 0.5f))
+                            .background(Color.Black.copy(alpha = (backgroundFade / 100f) * 0.5f))
                     )
                 }
 
@@ -1032,6 +1034,7 @@ fun CollageEditorScreen(
                         filterIntensity = filterIntensity,
                         glitterCard = "Flare 2",
                         glitterDensity = glitterDensity,
+                        isDrawingMode = (selectedTab == EditorTool.DRAW),
                         modifier = Modifier.fillMaxSize()
                     )
                 }

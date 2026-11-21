@@ -36,9 +36,9 @@ enum class AspectRatio(val displayName: String, val widthRatio: Float, val heigh
 }
 
 data class BorderSettings(
-    val outerSpacing: Float = 12f,
-    val cornerRadius: Float = 22f,
-    val spacing: Float = 8f
+    val outerSpacing: Float = 5f,
+    val cornerRadius: Float = 15f,
+    val spacing: Float = 5f
 )
 
 data class TextSticker(
