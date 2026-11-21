@@ -41,24 +41,8 @@ fun LayoutSelectionScreen(
     val count = selectedPhotos.size.coerceAtLeast(2)
 
     val layouts = remember(count) {
-        when {
-            count == 2 -> listOf(
-                LayoutOption("layout_2_vertical", "Split Vertical", 2, "2 photos side by side"),
-                LayoutOption("layout_2_horizontal", "Split Horizontal", 2, "2 photos top & bottom")
-            )
-            count == 3 -> listOf(
-                LayoutOption("layout_3_top", "Triple Top", 3, "1 top, 2 bottom"),
-                LayoutOption("layout_3_left", "Triple Left", 3, "1 left, 2 right")
-            )
-            count == 4 -> listOf(
-                LayoutOption("layout_pinwheel", "Asymmetric Pinwheel", 4, "Dynamic split layout"),
-                LayoutOption("layout_vertical_strips", "Vertical Strips", 4, "3 vertical columns"),
-                LayoutOption("layout_top_right", "Top & Right Stack", 4, "Large top + stacked right"),
-                LayoutOption("layout_large_top", "Large Top & Bottom", 4, "Large top + 3 bottom tiles")
-            )
-            else -> listOf(
-                LayoutOption("layout_5_grid", "Multi Grid", count, "$count photo custom layout")
-            )
+        com.oem.collagekmpapp.data.LayoutRepository().getLayouts(count).map {
+            LayoutOption(it.id, it.name, it.slotCount, it.description)
         }
     }
 

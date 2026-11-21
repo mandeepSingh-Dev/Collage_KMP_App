@@ -162,24 +162,8 @@ fun CollageEditorScreen(
     val count = selectedPhotos.size.coerceAtLeast(2)
 
     val layouts = remember(count) {
-        when {
-            count == 2 -> listOf(
-                LayoutOption("layout_2_vertical", "Split Vertical", 2, "2 photos side by side"),
-                LayoutOption("layout_2_horizontal", "Split Horizontal", 2, "2 photos top & bottom")
-            )
-            count == 3 -> listOf(
-                LayoutOption("layout_3_top", "Triple Top", 3, "1 top, 2 bottom"),
-                LayoutOption("layout_3_left", "Triple Left", 3, "1 left, 2 right")
-            )
-            count == 4 -> listOf(
-                LayoutOption("layout_pinwheel", "Asymmetric Pinwheel", 4, "Dynamic split layout"),
-                LayoutOption("layout_vertical_strips", "Vertical Strips", 4, "3 vertical columns"),
-                LayoutOption("layout_top_right", "Top & Right Stack", 4, "Large top + stacked right"),
-                LayoutOption("layout_large_top", "Large Top & Bottom", 4, "Large top + 3 bottom tiles")
-            )
-            else -> listOf(
-                LayoutOption("layout_5_grid", "Multi Grid", count, "$count photo custom layout")
-            )
+        com.oem.collagekmpapp.data.LayoutRepository().getLayouts(count).map {
+            LayoutOption(it.id, it.name, it.slotCount, it.description)
         }
     }
 
@@ -1345,7 +1329,12 @@ fun CollageEditorScreen(
 @Composable
 fun LayoutThumbnailPreview(layoutId: String, isSelected: Boolean) {
     val strokeColor = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
-    val strokeWidth = if (isSelected) 3f else 2f
+    val strokeWidth = if (isSelected) 2.5f else 1.5f
+
+    val repository = remember { com.oem.collagekmpapp.data.LayoutRepository() }
+    val layout = remember(layoutId) {
+        repository.getAllLayouts().find { it.id == layoutId }
+    }
 
     Canvas(modifier = Modifier.size(44.dp)) {
         val w = size.width
@@ -1353,42 +1342,21 @@ fun LayoutThumbnailPreview(layoutId: String, isSelected: Boolean) {
 
         drawRect(color = strokeColor, style = Stroke(width = strokeWidth))
 
-        when (layoutId) {
-            "layout_2_vertical" -> {
-                drawLine(color = strokeColor, start = Offset(w * 0.5f, 0f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
+        if (layout != null) {
+            layout.slots.forEach { slot ->
+                val left = slot.left * w
+                val top = slot.top * h
+                val width = (slot.right - slot.left) * w
+                val height = (slot.bottom - slot.top) * h
+                drawRect(
+                    color = strokeColor,
+                    topLeft = Offset(left, top),
+                    size = androidx.compose.ui.geometry.Size(width, height),
+                    style = Stroke(width = strokeWidth * 0.75f)
+                )
             }
-            "layout_2_horizontal" -> {
-                drawLine(color = strokeColor, start = Offset(0f, h * 0.5f), end = Offset(w, h * 0.5f), strokeWidth = strokeWidth)
-            }
-            "layout_3_top" -> {
-                drawLine(color = strokeColor, start = Offset(0f, h * 0.5f), end = Offset(w, h * 0.5f), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.5f, h * 0.5f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
-            }
-            "layout_3_left" -> {
-                drawLine(color = strokeColor, start = Offset(w * 0.5f, 0f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.5f, h * 0.5f), end = Offset(w, h * 0.5f), strokeWidth = strokeWidth)
-            }
-            "layout_pinwheel" -> {
-                drawLine(color = strokeColor, start = Offset(w * 0.55f, 0f), end = Offset(w * 0.55f, h * 0.55f), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(0f, h * 0.55f), end = Offset(w * 0.55f, h * 0.55f), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.45f, h * 0.45f), end = Offset(w * 0.45f, h), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.45f, h * 0.45f), end = Offset(w, h * 0.45f), strokeWidth = strokeWidth)
-            }
-            "layout_vertical_strips" -> {
-                drawLine(color = strokeColor, start = Offset(w * 0.33f, 0f), end = Offset(w * 0.33f, h), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.67f, 0f), end = Offset(w * 0.67f, h), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.33f, h * 0.65f), end = Offset(w * 0.67f, h * 0.65f), strokeWidth = strokeWidth)
-            }
-            "layout_top_right" -> {
-                drawLine(color = strokeColor, start = Offset(w * 0.6f, 0f), end = Offset(w * 0.6f, h), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.6f, h * 0.33f), end = Offset(w, h * 0.33f), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.6f, h * 0.67f), end = Offset(w, h * 0.67f), strokeWidth = strokeWidth)
-            }
-            else -> {
-                drawLine(color = strokeColor, start = Offset(0f, h * 0.55f), end = Offset(w, h * 0.55f), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.33f, h * 0.55f), end = Offset(w * 0.33f, h), strokeWidth = strokeWidth)
-                drawLine(color = strokeColor, start = Offset(w * 0.67f, h * 0.55f), end = Offset(w * 0.67f, h), strokeWidth = strokeWidth)
-            }
+        } else {
+            drawLine(color = strokeColor, start = Offset(w * 0.5f, 0f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
         }
     }
 }

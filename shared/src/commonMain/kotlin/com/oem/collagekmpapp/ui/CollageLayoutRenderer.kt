@@ -36,108 +36,39 @@ fun RenderCollageLayout(
         val safePhotos = if (photos.isEmpty()) listOf("default") else photos
         val count = safePhotos.size
 
-        when {
-            // 2-Photo Layouts
-            count == 2 -> {
-                when (layoutId) {
-                    "layout_2_horizontal" -> {
-                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                            CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                            CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                        }
-                    }
-                    else -> { // Vertical split
-                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                            CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                            CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                        }
-                    }
-                }
-            }
-            // 3-Photo Layouts
-            count == 3 -> {
-                when (layoutId) {
-                    "layout_3_left" -> {
-                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                            CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                            Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                                CollageImageSlot(safePhotos[2], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                            }
-                        }
-                    }
-                    else -> { // Triple Top
-                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                            CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                            Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                                CollageImageSlot(safePhotos[2], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                            }
-                        }
-                    }
-                }
-            }
-            // 4-Photo Layouts
-            count == 4 -> {
-                when (layoutId) {
-                    "layout_pinwheel" -> {
-                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                            Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1.2f).fillMaxHeight())
-                                CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(0.8f).fillMaxHeight())
-                            }
-                            Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                CollageImageSlot(safePhotos[2], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(0.8f).fillMaxHeight())
-                                CollageImageSlot(safePhotos[3], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1.2f).fillMaxHeight())
-                            }
-                        }
-                    }
-                    "layout_vertical_strips" -> {
-                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                            CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                            Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(2f).fillMaxWidth())
-                                CollageImageSlot(safePhotos[2], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                            }
-                            CollageImageSlot(safePhotos[3], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                        }
-                    }
-                    "layout_top_right" -> {
-                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                            CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1.5f).fillMaxHeight())
-                            Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                                CollageImageSlot(safePhotos[2], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                                CollageImageSlot(safePhotos[3], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxWidth())
-                            }
-                        }
-                    }
-                    else -> { // Large Top & 3 Bottom
-                        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                            CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1.5f).fillMaxWidth())
-                            Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                CollageImageSlot(safePhotos[1], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                                CollageImageSlot(safePhotos[2], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                                CollageImageSlot(safePhotos[3], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                            }
-                        }
-                    }
-                }
-            }
-            // 5+ Photo Layouts
-            else -> {
-                Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(spacing)) {
-                    Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                        CollageImageSlot(safePhotos[0], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                        CollageImageSlot(safePhotos.getOrElse(1) { safePhotos[0] }, cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                    }
-                    Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                        CollageImageSlot(safePhotos.getOrElse(2) { safePhotos[0] }, cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                        CollageImageSlot(safePhotos.getOrElse(3) { safePhotos[0] }, cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                        if (count >= 5) {
-                            CollageImageSlot(safePhotos[4], cornerRadius, filterPreset, filterIntensity, glitterCard, glitterDensity, Modifier.weight(1f).fillMaxHeight())
-                        }
-                    }
+        val repository = remember { com.oem.collagekmpapp.data.LayoutRepository() }
+        val layout = remember(layoutId, count) {
+            repository.getAllLayouts().find { it.id == layoutId }
+                ?: repository.getLayouts(count).firstOrNull()
+                ?: com.oem.collagekmpapp.model.CollageLayout(layoutId, "Default", count, "", listOf(com.oem.collagekmpapp.model.Slot(0f, 0f, 1f, 1f)))
+        }
+
+        val maxWidthDp = maxWidth
+        val maxHeightDp = maxHeight
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            layout.slots.forEachIndexed { index, slot ->
+                val photoUri = safePhotos.getOrElse(index) { safePhotos.first() }
+                val slotWidth = maxWidthDp * (slot.right - slot.left)
+                val slotHeight = maxHeightDp * (slot.bottom - slot.top)
+                val offsetX = maxWidthDp * slot.left
+                val offsetY = maxHeightDp * slot.top
+
+                Box(
+                    modifier = Modifier
+                        .size(slotWidth, slotHeight)
+                        .offset(x = offsetX, y = offsetY)
+                        .padding(spacing / 2)
+                ) {
+                    CollageImageSlot(
+                        uri = photoUri,
+                        cornerRadius = cornerRadius,
+                        filterPreset = filterPreset,
+                        filterIntensity = filterIntensity,
+                        glitterCard = glitterCard,
+                        glitterDensity = glitterDensity,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
         }
