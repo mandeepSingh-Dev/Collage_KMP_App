@@ -31,7 +31,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -187,17 +189,20 @@ fun CollageEditorScreen(
 
     val emojis = listOf("😍", "😎", "🔥", "✨", "🥳", "👑", "🌈", "⭐", "🦋")
 
-    val solidColors = listOf(
-        Color(0xFFFFFFFF),
-        Color(0xFFCBD5E1),
-        Color(0xFF1E293B),
-        Color(0xFFEF4444),
-        Color(0xFFF97316),
-        Color(0xFFFACC15),
-        Color(0xFF22C55E),
-        Color(0xFF3B82F6),
-        Color(0xFF9333EA)
+    val sharedColors = listOf(
+        Color(0xFFFFFFFF), Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0), Color(0xFFCBD5E1), Color(0xFF94A3B8), Color(0xFF64748B), Color(0xFF475569), Color(0xFF334155), Color(0xFF1E293B), Color(0xFF0F172A),
+        Color(0xFFEF4444), Color(0xFFF87171), Color(0xFFDC2626), Color(0xFFB91C1C), Color(0xFF991B1B),
+        Color(0xFFF97316), Color(0xFFFB923C), Color(0xFFEA580C), Color(0xFFC2410C), Color(0xFF9A3412),
+        Color(0xFFFACC15), Color(0xFFFDE047), Color(0xFFEAB308), Color(0xFFCA8A04), Color(0xFFA16207),
+        Color(0xFF22C55E), Color(0xFF4ADE80), Color(0xFF16A34A), Color(0xFF15803D), Color(0xFF166534),
+        Color(0xFF06B6D4), Color(0xFF22D3EE), Color(0xFF0891B2), Color(0xFF0E7490), Color(0xFF155E75),
+        Color(0xFF3B82F6), Color(0xFF60A5FA), Color(0xFF2563EB), Color(0xFF1D4ED8), Color(0xFF1E40AF),
+        Color(0xFF9333EA), Color(0xFFA855F7), Color(0xFF7E22CE), Color(0xFFEC4899), Color(0xFFF43F5E), Color(0xFFBE185D)
     )
+
+    val solidColors = sharedColors
+    val brushColors = sharedColors
+    val textColors = sharedColors
 
     val gradients = listOf(
         Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFFACC15), Color(0xFF22C55E), Color(0xFF3B82F6))),
@@ -208,29 +213,7 @@ fun CollageEditorScreen(
         Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF7DD3FC)))
     )
 
-    val brushTypes = listOf("Pen", "Marker", "Neon", "Eraser")
-    val brushColors = listOf(
-        Color(0xFFF43F8E),
-        Color(0xFFFFFFFF),
-        Color(0xFFFACC15),
-        Color(0xFFF97316),
-        Color(0xFFEF4444),
-        Color(0xFF3B82F6),
-        Color(0xFF22C55E),
-        Color(0xFF9333EA)
-    )
-
-    val textColors = listOf(
-        Color.White,
-        Color.Black,
-        Color(0xFF2563EB),
-        Color(0xFFEF4444),
-        Color(0xFF22C55E),
-        Color(0xFFFACC15),
-        Color(0xFFEC4899),
-        Color(0xFF9333EA),
-        Color(0xFF06B6D4)
-    )
+    val brushTypes = listOf("Pen", "Eraser")
 
     Scaffold(
         topBar = {
@@ -265,32 +248,54 @@ fun CollageEditorScreen(
                     when (selectedTab) {
                         EditorTool.RATIO -> {
                             Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.Center,
-                                horizontalAlignment = Alignment.CenterHorizontally
+                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Text("Canvas Aspect Ratio", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    verticalAlignment = Alignment.CenterVertically
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    FilterChip(
-                                        selected = aspectRatio == AspectRatio.SQUARE,
-                                        onClick = { aspectRatio = AspectRatio.SQUARE },
-                                        label = { Text("1:1 Square") }
-                                    )
-                                    FilterChip(
-                                        selected = aspectRatio == AspectRatio.PORTRAIT,
-                                        onClick = { aspectRatio = AspectRatio.PORTRAIT },
-                                        label = { Text("4:5 Portrait") }
-                                    )
-                                    FilterChip(
-                                        selected = aspectRatio == AspectRatio.STORY,
-                                        onClick = { aspectRatio = AspectRatio.STORY },
-                                        label = { Text("9:16 Story") }
-                                    )
+                                    items(AspectRatio.entries) { ratio ->
+                                        val isSelected = aspectRatio == ratio
+                                        Box(
+                                            modifier = Modifier
+                                                .width(76.dp)
+                                                .height(56.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF8FAFC))
+                                                .border(
+                                                    width = if (isSelected) 2.dp else 1.dp,
+                                                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
+                                                    shape = RoundedCornerShape(10.dp)
+                                                )
+                                                .clickable { aspectRatio = ratio },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(
+                                                    text = ratio.displayName,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF1E293B)
+                                                )
+                                                if (ratio.badge.isNotEmpty()) {
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = ratio.badge,
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = when(ratio.badge) {
+                                                            "Instagram" -> Color(0xFFE1306C)
+                                                            "Pinterest" -> Color(0xFFE60023)
+                                                            "YouTube" -> Color(0xFFFF0000)
+                                                            else -> Color(0xFF64748B)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1013,10 +1018,12 @@ fun CollageEditorScreen(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
+                }
+                if (backgroundFade > 0f) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = (backgroundFade / 100f) * 0.5f))
+                            .background(Color.White.copy(alpha = (backgroundFade / 100f) * 0.7f))
                     )
                 }
 
@@ -1064,44 +1071,43 @@ fun CollageEditorScreen(
                 // Render Drawing Canvas Overlay
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     drawStrokes.forEach { stroke ->
-                        if (stroke.points.size > 1) {
-                            for (i in 0 until stroke.points.size - 1) {
-                                val start = stroke.points[i]
-                                val end = stroke.points[i + 1]
-                                if (!stroke.isEraser) {
-                                    drawLine(
-                                        color = stroke.color.copy(alpha = brushOpacity / 100f),
-                                        start = start,
-                                        end = end,
-                                        strokeWidth = stroke.strokeWidth,
-                                        cap = StrokeCap.Round
-                                    )
+                        if (stroke.points.size > 1 && !stroke.isEraser) {
+                            val path = Path().apply {
+                                moveTo(stroke.points[0].x, stroke.points[0].y)
+                                for (i in 1 until stroke.points.size) {
+                                    lineTo(stroke.points[i].x, stroke.points[i].y)
                                 }
                             }
+                            drawPath(
+                                path = path,
+                                color = stroke.color,
+                                alpha = brushOpacity / 100f,
+                                style = Stroke(
+                                    width = stroke.strokeWidth,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
+                                )
+                            )
                         }
                     }
-                    if (currentStrokePoints.size > 1) {
-                        for (i in 0 until currentStrokePoints.size - 1) {
-                            val start = currentStrokePoints[i]
-                            val end = currentStrokePoints[i + 1]
-                            val isEraser = selectedBrushType == "Eraser"
-                            val strokeWidth = when (selectedBrushType) {
-                                "Marker" -> 16f
-                                "Neon" -> 10f
-                                "Eraser" -> 24f
-                                else -> 6f
-                            } * (brushDensity / 50f)
-
-                            if (!isEraser) {
-                                drawLine(
-                                    color = brushColor.copy(alpha = brushOpacity / 100f),
-                                    start = start,
-                                    end = end,
-                                    strokeWidth = strokeWidth,
-                                    cap = StrokeCap.Round
-                                )
+                    if (currentStrokePoints.size > 1 && selectedBrushType != "Eraser") {
+                        val path = Path().apply {
+                            moveTo(currentStrokePoints[0].x, currentStrokePoints[0].y)
+                            for (i in 1 until currentStrokePoints.size) {
+                                lineTo(currentStrokePoints[i].x, currentStrokePoints[i].y)
                             }
                         }
+                        val strokeWidth = 6f * (brushDensity / 50f)
+                        drawPath(
+                            path = path,
+                            color = brushColor,
+                            alpha = brushOpacity / 100f,
+                            style = Stroke(
+                                width = strokeWidth,
+                                cap = StrokeCap.Round,
+                                join = StrokeJoin.Round
+                            )
+                        )
                     }
                 }
 

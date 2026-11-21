@@ -27,12 +27,18 @@ enum class GlitterEffect(val displayName: String) {
     MAGIC_DUST("Magic Dust")
 }
 
-enum class AspectRatio(val displayName: String, val widthRatio: Float, val heightRatio: Float) {
-    SQUARE("1:1", 1f, 1f),
-    PORTRAIT("4:5", 4f, 5f),
-    STORY("9:16", 9f, 16f),
-    LANDSCAPE("16:9", 16f, 9f),
-    WIDE("3:4", 3f, 4f)
+enum class AspectRatio(val displayName: String, val widthRatio: Float, val heightRatio: Float, val badge: String = "") {
+    SQUARE("1:1", 1f, 1f, "Instagram"),
+    PORTRAIT("4:5", 4f, 5f, "Instagram"),
+    STORY("9:16", 9f, 16f, "Pinterest"),
+    LANDSCAPE("16:9", 16f, 9f, "YouTube"),
+    WIDE("3:4", 3f, 4f, ""),
+    R_5_4("5:4", 5f, 4f, "Box"),
+    R_3_4("3:4", 3f, 4f, ""),
+    R_4_3("4:3", 4f, 3f, ""),
+    R_2_3("2:3", 2f, 3f, "Pinterest"),
+    R_3_2("3:2", 3f, 2f, ""),
+    R_1_2("1:2", 1f, 2f, "")
 }
 
 data class BorderSettings(
