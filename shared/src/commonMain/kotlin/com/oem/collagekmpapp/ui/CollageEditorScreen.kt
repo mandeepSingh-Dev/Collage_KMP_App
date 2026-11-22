@@ -101,6 +101,16 @@ fun CollageEditorScreen(
 ) {
     var selectedTab by remember { mutableStateOf(EditorTool.LAYOUT) }
     var currentLayoutId by remember { mutableStateOf(layoutId) }
+
+    val layoutRepo = remember { com.oem.collagekmpapp.data.LayoutRepository() }
+    val currentLayout = remember(currentLayoutId, selectedPhotos.size) {
+        layoutRepo.getAllLayouts().find { it.id == currentLayoutId }
+            ?: layoutRepo.getLayouts(selectedPhotos.size.coerceAtLeast(1)).firstOrNull()
+            ?: com.oem.collagekmpapp.model.CollageLayout(currentLayoutId, "Default", selectedPhotos.size, "", listOf(com.oem.collagekmpapp.model.Slot(0f, 0f, 1f, 1f)))
+    }
+
+    var currentSlots by remember(currentLayoutId) { mutableStateOf(currentLayout.slots) }
+    var selectedSlotIndex by remember(currentLayoutId) { mutableStateOf<Int?>(null) }
     var aspectRatio by remember { mutableStateOf(AspectRatio.SQUARE) }
     var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
 
@@ -527,19 +537,16 @@ fun CollageEditorScreen(
                                 verticalArrangement = Arrangement.SpaceBetween
                             ) {
                                 val currentValue = adjustValues[selectedAdjustItem] ?: 0f
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Text("$selectedAdjustItem: ${if (currentValue > 0) "+" else ""}${currentValue.toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                                    Slider(
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    FluidSlider(
                                         value = currentValue,
                                         onValueChange = { newVal ->
                                             adjustValues = adjustValues + (selectedAdjustItem to newVal)
                                         },
                                         valueRange = -50f..50f,
-                                        modifier = Modifier.width(240.dp).height(20.dp)
+                                        modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
                                 }
 
@@ -593,6 +600,7 @@ fun CollageEditorScreen(
                                 }
                             }
                         }
+                        /*
                         EditorTool.GLITTER -> {
                             Column(
                                 modifier = Modifier
@@ -655,6 +663,8 @@ fun CollageEditorScreen(
                                 }
                             }
                         }
+                        */
+                        EditorTool.GLITTER -> {}
                         EditorTool.TEXT -> {
                             Column(
                                 modifier = Modifier.fillMaxSize(),
@@ -921,7 +931,7 @@ fun CollageEditorScreen(
                         Triple(EditorTool.FILTER, "Filter", Icons.Default.Star),
                         Triple(EditorTool.STICKERS, "Stickers", Icons.Default.EmojiEmotions),
                         Triple(EditorTool.ADJUST, "Adjust", Icons.Default.Tune),
-                        Triple(EditorTool.GLITTER, "Glitter", Icons.Default.AutoAwesome),
+                        // Triple(EditorTool.GLITTER, "Glitter", Icons.Default.AutoAwesome),
                         Triple(EditorTool.TEXT, "Text", null),
                         Triple(EditorTool.BACKGROUND, "Background", Icons.Default.Wallpaper),
                         Triple(EditorTool.DRAW, "Draw", Icons.Default.Edit)
@@ -1082,6 +1092,10 @@ fun CollageEditorScreen(
                         glitterCard = selectedGlitterCard,
                         glitterDensity = glitterDensity,
                         isDrawingMode = (selectedTab == EditorTool.DRAW),
+                        slots = currentSlots,
+                        selectedSlotIndex = selectedSlotIndex,
+                        onSelectSlot = { selectedSlotIndex = it },
+                        onSlotsChanged = { currentSlots = it },
                         modifier = Modifier.fillMaxSize()
                     )
                 }

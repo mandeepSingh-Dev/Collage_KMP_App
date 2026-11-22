@@ -1,6 +1,8 @@
 package com.oem.collagekmpapp.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,11 +17,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.model.CollageLayout
+import com.oem.collagekmpapp.model.Slot
 
 @Composable
 fun RenderCollageLayout(
@@ -32,35 +38,56 @@ fun RenderCollageLayout(
     glitterCard: String,
     glitterDensity: Float,
     isDrawingMode: Boolean = false,
+    slots: List<Slot>? = null,
+    selectedSlotIndex: Int? = null,
+    onSelectSlot: ((Int?) -> Unit)? = null,
+    onSlotsChanged: ((List<Slot>) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val haptics = LocalHapticFeedback.current
+
     BoxWithConstraints(modifier = modifier) {
         val safePhotos = if (photos.isEmpty()) listOf("default") else photos
         val count = safePhotos.size
 
         val repository = remember { com.oem.collagekmpapp.data.LayoutRepository() }
-        val layout = remember(layoutId, count) {
+        val defaultLayout = remember(layoutId, count) {
             repository.getAllLayouts().find { it.id == layoutId }
                 ?: repository.getLayouts(count).firstOrNull()
-                ?: com.oem.collagekmpapp.model.CollageLayout(layoutId, "Default", count, "", listOf(com.oem.collagekmpapp.model.Slot(0f, 0f, 1f, 1f)))
+                ?: CollageLayout(layoutId, "Default", count, "", listOf(Slot(0f, 0f, 1f, 1f)))
         }
 
+        val activeSlots = slots ?: defaultLayout.slots
         val maxWidthDp = maxWidth
         val maxHeightDp = maxHeight
 
-        Box(modifier = Modifier.fillMaxSize()) {
-            layout.slots.forEachIndexed { index, slot ->
+        Box(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+            detectTapGestures(onTap = { onSelectSlot?.invoke(null) })
+        }) {
+            activeSlots.forEachIndexed { index, slot ->
                 val photoUri = safePhotos.getOrElse(index) { safePhotos.first() }
-                val slotWidth = maxWidthDp * (slot.right - slot.left)
-                val slotHeight = maxHeightDp * (slot.bottom - slot.top)
-                val offsetX = maxWidthDp * slot.left
-                val offsetY = maxHeightDp * slot.top
+                val isSelected = selectedSlotIndex == index
+
+                val slotWidthDp = maxWidthDp * (slot.right - slot.left)
+                val slotHeightDp = maxHeightDp * (slot.bottom - slot.top)
+                val offsetXDp = maxWidthDp * slot.left
+                val offsetYDp = maxHeightDp * slot.top
 
                 Box(
                     modifier = Modifier
-                        .size(slotWidth, slotHeight)
-                        .offset(x = offsetX, y = offsetY)
+                        .size(slotWidthDp, slotHeightDp)
+                        .offset(x = offsetXDp, y = offsetYDp)
                         .padding(spacing / 2)
+                        .pointerInput(index, isDrawingMode) {
+                            if (!isDrawingMode) {
+                                detectTapGestures(
+                                    onTap = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSelectSlot?.invoke(index)
+                                    }
+                                )
+                            }
+                        }
                 ) {
                     CollageImageSlot(
                         uri = photoUri,
@@ -199,7 +226,7 @@ fun CollageImageSlot(
                     Icon(
                         imageVector = Icons.Default.Star,
                         contentDescription = null,
-                        tint = tintColor,
+                        tint = Color(0xFFFFD700),
                         modifier = Modifier
                             .size(24.dp)
                             .align(Alignment.Center)
