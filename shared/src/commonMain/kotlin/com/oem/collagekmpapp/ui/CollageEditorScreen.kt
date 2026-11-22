@@ -25,6 +25,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -120,6 +121,17 @@ fun CollageEditorScreen(
     var glitterDensity by remember { mutableStateOf(0f) }
     var selectedGlitterCard by remember { mutableStateOf("Glitz") }
 
+    var selectedStickerCategory by remember { mutableStateOf("All") }
+    val stickerCategories = listOf("All", "Emoji", "Love", "Party", "Travel")
+    val stickerMap = remember {
+        mapOf(
+            "Emoji" to listOf("😍", "😎", "🔥", "✨", "🥳", "👑", "🌈", "⭐", "🦋", "💯", "🚀", "💎"),
+            "Love" to listOf("🥰", "❤️", "💖", "💕", "💘", "💋", "😍", "💌", "💍", "🌹", "🫶", "✨"),
+            "Party" to listOf("🥳", "🥂", "🎂", "🎈", "🎉", "🎊", "🍾", "🎁", "💃", "🎶", "🍸", "🍕"),
+            "Travel" to listOf("✈️", "🌴", "🗺️", "🗽", "🗼", "🏕️", "🚗", "🏖️", "🎒", "🚂", "🚢", "🏔️")
+        )
+    }
+
     // Color Grading / Adjust states with -50 to 50 range and neutral at 0
     var selectedAdjustItem by remember { mutableStateOf("Brightness") }
     var adjustValues by remember { mutableStateOf(mapOf(
@@ -143,6 +155,7 @@ fun CollageEditorScreen(
     // Background settings states matching 09_background_settings_screen.svg
     var canvasBgColor by remember { mutableStateOf<Color>(Color.White) }
     var canvasBgGradient by remember { mutableStateOf<Brush?>(null) }
+    var canvasBgGradientColors by remember { mutableStateOf(emptyList<Color>()) }
     var backgroundFade by remember { mutableStateOf(0f) }
     var selectedBackgroundPhoto by remember { mutableStateOf<String?>(null) }
 
@@ -175,6 +188,9 @@ fun CollageEditorScreen(
     }
 
     var showExportDialog by remember { mutableStateOf(false) }
+    var exportQuality by remember { mutableStateOf("HD 1080p") }
+    var exportFormat by remember { mutableStateOf("JPG") }
+    var saveSuccessMessage by remember { mutableStateOf<String?>(null) }
 
     val count = selectedPhotos.size.coerceAtLeast(2)
 
@@ -474,21 +490,64 @@ fun CollageEditorScreen(
                             }
                         }
                         EditorTool.STICKERS -> {
-                            Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Stickers & Emojis", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            val currentStickers = if (selectedStickerCategory == "All") {
+                                stickerMap.values.flatten().distinct()
+                            } else {
+                                stickerMap[selectedStickerCategory] ?: emptyList()
+                            }
 
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .animateContentSize()
+                                    .padding(vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text("Stickers", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    stickerCategories.forEach { category ->
+                                        val isSelected = selectedStickerCategory == category
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.clickable { selectedStickerCategory = category }
+                                        ) {
+                                            Text(
+                                                text = category,
+                                                fontSize = 13.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            if (isSelected) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(16.dp)
+                                                        .height(2.5.dp)
+                                                        .background(Color(0xFF2563EB), RoundedCornerShape(1.5.dp))
+                                                )
+                                            } else {
+                                                Spacer(modifier = Modifier.height(2.5.dp))
+                                            }
+                                        }
+                                    }
+                                }
+
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(5),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth().height(140.dp)
                                 ) {
                                     item {
                                         Box(
                                             modifier = Modifier
-                                                .width(64.dp)
-                                                .height(72.dp)
+                                                .aspectRatio(1f)
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .background(Color(0xFFEFF6FF))
                                                 .border(1.5.dp, Color(0xFF2563EB), RoundedCornerShape(12.dp))
@@ -498,17 +557,16 @@ fun CollageEditorScreen(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
-                                                Text("Photo", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                                                Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                                                Text("Add Photo", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
                                             }
                                         }
                                     }
 
-                                    items(emojis) { emoji ->
+                                    gridItems(currentStickers) { emoji ->
                                         Box(
                                             modifier = Modifier
-                                                .width(64.dp)
-                                                .height(72.dp)
+                                                .aspectRatio(1f)
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .background(Color(0xFFF8FAFC))
                                                 .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(12.dp))
@@ -525,7 +583,7 @@ fun CollageEditorScreen(
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(emoji, fontSize = 28.sp)
+                                            Text(emoji, fontSize = 24.sp)
                                         }
                                     }
                                 }
@@ -771,6 +829,7 @@ fun CollageEditorScreen(
                                                 .clickable {
                                                     canvasBgColor = color
                                                     canvasBgGradient = null
+                                                    canvasBgGradientColors = emptyList()
                                                     selectedBackgroundPhoto = null
                                                     backgroundFade = 0f
                                                 }
@@ -792,6 +851,28 @@ fun CollageEditorScreen(
                                                 .border(1.dp, Color(0xFFCBD5E1), CircleShape)
                                                 .clickable {
                                                     canvasBgGradient = grad
+                                                    canvasBgGradientColors = when (gradients.indexOf(grad)) {
+                                                        0 -> listOf(Color(0xFFEF4444), Color(0xFFFACC15), Color(0xFF22C55E), Color(0xFF3B82F6))
+                                                        1 -> listOf(Color(0xFFF43F5E), Color(0xFFFBBF24))
+                                                        2 -> listOf(Color(0xFFFB923C), Color(0xFFF472B6), Color(0xFF38BDF8))
+                                                        3 -> listOf(Color(0xFF34D399), Color(0xFF2563EB))
+                                                        4 -> listOf(Color(0xFFF5D0FE), Color(0xFF93C5FD))
+                                                        5 -> listOf(Color(0xFF0F172A), Color(0xFF7DD3FC))
+                                                        6 -> listOf(Color(0xFFFF007F), Color(0xFFFF758C), Color(0xFFFF7EB3))
+                                                        7 -> listOf(Color(0xFF651FFF), Color(0xFF00E5FF))
+                                                        8 -> listOf(Color(0xFFFF9100), Color(0xFFFFEA00))
+                                                        9 -> listOf(Color(0xFF00E676), Color(0xFF1DE9B6))
+                                                        10 -> listOf(Color(0xFFF50057), Color(0xFFFF4081))
+                                                        11 -> listOf(Color(0xFF3D5AFE), Color(0xFF2F80ED))
+                                                        12 -> listOf(Color(0xFFFF3D00), Color(0xFFFF9100))
+                                                        13 -> listOf(Color(0xFF1A237E), Color(0xFF3949AB))
+                                                        14 -> listOf(Color(0xFF004D40), Color(0xFF00897B))
+                                                        15 -> listOf(Color(0xFFB71C1C), Color(0xFFD32F2F))
+                                                        16 -> listOf(Color(0xFF4A148C), Color(0xFF7B1FA2))
+                                                        17 -> listOf(Color(0xFF880E4F), Color(0xFFC2185B))
+                                                        18 -> listOf(Color(0xFF0D47A1), Color(0xFF1976D2))
+                                                        else -> emptyList()
+                                                    }
                                                     selectedBackgroundPhoto = null
                                                     backgroundFade = 0f
                                                 }
@@ -1370,21 +1451,34 @@ fun CollageEditorScreen(
         }
 
         if (showExportDialog) {
-            AlertDialog(
-                onDismissRequest = { showExportDialog = false },
-                title = { Text("Export & Share Collage") },
-                text = { Text("Your custom collage with ${selectedPhotos.size} photos is ready!") },
-                confirmButton = {
-                    Button(onClick = { showExportDialog = false }) {
-                        Text("Save to Gallery")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showExportDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
+            Box(modifier = Modifier.fillMaxSize().zIndex(100f).background(Color.White)) {
+                ExportShareScreen(
+                    layoutId = currentLayoutId,
+                    selectedPhotos = selectedPhotos,
+                    slots = currentSlots,
+                    spacingDp = borderSettings.spacing,
+                    outerSpacingDp = borderSettings.outerSpacing,
+                    cornerRadiusDp = borderSettings.cornerRadius,
+                    filterPreset = selectedPreset,
+                    filterIntensity = filterIntensity,
+                    backgroundPhoto = selectedBackgroundPhoto,
+                    backgroundFade = backgroundFade,
+                    backgroundColor = canvasBgColor,
+                    backgroundGradientColors = canvasBgGradientColors,
+                    aspectRatioWidth = aspectRatio.widthRatio,
+                    aspectRatioHeight = aspectRatio.heightRatio,
+                    adjustValues = adjustValues,
+                    overlayItems = overlayItems,
+                    drawStrokes = drawStrokes,
+                    collageText = collageText,
+                    textColor = textColor,
+                    selectedFont = selectedFont,
+                    textOffset = textOffset,
+                    onHome = { showExportDialog = false; onBack() },
+                    onBack = { showExportDialog = false },
+                    onCreateAnother = { showExportDialog = false; onBack() }
+                )
+            }
         }
     }
 }
