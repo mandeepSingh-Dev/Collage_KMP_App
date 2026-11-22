@@ -1,5 +1,7 @@
 package com.oem.collagekmpapp.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -103,10 +105,10 @@ fun CollageEditorScreen(
     var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
 
     // Filter & Glitter states
-    var filterIntensity by remember { mutableStateOf(50f) }
+    var filterIntensity by remember { mutableStateOf(0f) }
     var selectedPreset by remember { mutableStateOf("Original") }
-    var glitterDensity by remember { mutableStateOf(65f) }
-    var selectedGlitterCard by remember { mutableStateOf("Flare 2") }
+    var glitterDensity by remember { mutableStateOf(0f) }
+    var selectedGlitterCard by remember { mutableStateOf("Glitz") }
 
     // Color Grading / Adjust states with -50 to 50 range and neutral at 0
     var selectedAdjustItem by remember { mutableStateOf("Brightness") }
@@ -129,14 +131,14 @@ fun CollageEditorScreen(
     var showAddTextDialog by remember { mutableStateOf(false) }
 
     // Background settings states matching 09_background_settings_screen.svg
-    var canvasBgColor by remember { mutableStateOf<Color>(Color(0xFFF8FAFC)) }
+    var canvasBgColor by remember { mutableStateOf<Color>(Color.White) }
     var canvasBgGradient by remember { mutableStateOf<Brush?>(null) }
     var backgroundFade by remember { mutableStateOf(0f) }
     var selectedBackgroundPhoto by remember { mutableStateOf<String?>(null) }
 
     // Draw & Brush states matching 10_draw_brush_screen.svg
-    var selectedBrushType by remember { mutableStateOf("Neon") }
-    var brushDensity by remember { mutableStateOf(35f) }
+    var selectedBrushType by remember { mutableStateOf("Pen") }
+    var brushDensity by remember { mutableStateOf(20f) }
     var brushOpacity by remember { mutableStateOf(100f) }
     var brushColor by remember { mutableStateOf(Color(0xFFF43F8E)) }
 
@@ -173,8 +175,7 @@ fun CollageEditorScreen(
     }
 
     val filterPresets = FilterRepository.presets
-    val glitterCategories = listOf("Sparkle", "Bokeh", "Stardust", "Light Leak", "Neon")
-    val glitterCards = listOf("Glitz", "Spark 1", "Flare 2", "Dust")
+    val glitterCards = listOf("Glitz", "Spark 1", "Flare 2", "Dust", "Diamond Glow", "Heart Sparkle", "Golden Shimmer")
     val fontCards = listOf("Modern", "Script", "Bold", "Retro", "Serif", "Neon")
 
     val adjustOptions = listOf(
@@ -402,12 +403,13 @@ fun CollageEditorScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .verticalScroll(rememberScrollState())
+                                    .animateContentSize()
                                     .padding(vertical = 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Text("Filters", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
-                                if (selectedPreset != "Original") {
+                                AnimatedVisibility(visible = selectedPreset != "Original") {
                                     Column(modifier = Modifier.fillMaxWidth()) {
                                         Text("Intensity: ${filterIntensity.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
                                         Spacer(modifier = Modifier.height(2.dp))
@@ -437,17 +439,19 @@ fun CollageEditorScreen(
                                                 modifier = Modifier
                                                     .size(46.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFFE2E8F0))
+                                                    .background(getFilterTintColor(preset))
                                                     .border(
-                                                        width = if (isSelected) 2.5.dp else 0.dp,
-                                                        color = Color(0xFF2563EB),
+                                                        width = if (isSelected) 2.5.dp else 1.dp,
+                                                        color = if (isSelected) Color(0xFF2563EB) else Color.Transparent,
                                                         shape = CircleShape
                                                     ),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(preset.take(2), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+                                                if (preset == "Original") {
+                                                    Text("Orig", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
+                                                }
                                             }
-                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Spacer(modifier = Modifier.height(4.dp))
                                             Text(
                                                 text = preset,
                                                 fontSize = 11.sp,
@@ -591,22 +595,14 @@ fun CollageEditorScreen(
                         }
                         EditorTool.GLITTER -> {
                             Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .animateContentSize()
+                                    .padding(vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text("Glitters & Effects", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    glitterCategories.forEach { category ->
-                                        TextButton(onClick = {}) {
-                                            Text(text = category, fontSize = 13.sp, color = Color(0xFF64748B))
-                                        }
-                                    }
-                                }
+                                Text("Glitters", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     Text("Density: ${glitterDensity.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
@@ -1008,29 +1004,46 @@ fun CollageEditorScreen(
                     .then(bgModifier)
                     .alpha(fadeVal.coerceIn(0.4f, 1f))
                     .pointerInput(selectedTab, selectedBrushType, brushColor, brushDensity) {
-                        if (selectedTab == EditorTool.DRAW) {
+                        if (selectedTab == EditorTool.DRAW)
+                        {
                             detectDragGestures(
                                 onDragStart = { offset ->
                                     currentStrokePoints = listOf(offset)
+                                    if (selectedBrushType == "Eraser") {
+                                        drawStrokes = drawStrokes.filter { stroke ->
+                                            stroke.points.none { sp ->
+                                                val dx = sp.x - offset.x
+                                                val dy = sp.y - offset.y
+                                                (dx * dx + dy * dy) < (40f * 40f)
+                                            }
+                                        }
+                                    }
                                 },
                                 onDrag = { change, _ ->
                                     currentStrokePoints = currentStrokePoints + change.position
+                                    if (selectedBrushType == "Eraser") {
+                                        val ep = change.position
+                                        drawStrokes = drawStrokes.filter { stroke ->
+                                            stroke.points.none { sp ->
+                                                val dx = sp.x - ep.x
+                                                val dy = sp.y - ep.y
+                                                (dx * dx + dy * dy) < (40f * 40f)
+                                            }
+                                        }
+                                    }
                                 },
                                 onDragEnd = {
                                     if (currentStrokePoints.isNotEmpty()) {
                                         val isEraser = selectedBrushType == "Eraser"
-                                        val strokeWidth = when (selectedBrushType) {
-                                            "Marker" -> 16f
-                                            "Neon" -> 10f
-                                            "Eraser" -> 24f
-                                            else -> 6f
-                                        } * (brushDensity / 50f)
-                                        drawStrokes = drawStrokes + DrawStroke(
-                                            points = currentStrokePoints,
-                                            color = if (isEraser) Color.Transparent else brushColor,
-                                            strokeWidth = strokeWidth,
-                                            isEraser = isEraser
-                                        )
+                                        if (!isEraser) {
+                                            val strokeWidth = 6f * (brushDensity / 50f)
+                                            drawStrokes = drawStrokes + DrawStroke(
+                                                points = currentStrokePoints,
+                                                color = brushColor,
+                                                strokeWidth = strokeWidth,
+                                                isEraser = false
+                                            )
+                                        }
                                         currentStrokePoints = emptyList()
                                     }
                                 }
@@ -1066,7 +1079,7 @@ fun CollageEditorScreen(
                         cornerRadius = borderSettings.cornerRadius.dp,
                         filterPreset = selectedPreset,
                         filterIntensity = filterIntensity,
-                        glitterCard = "Flare 2",
+                        glitterCard = selectedGlitterCard,
                         glitterDensity = glitterDensity,
                         isDrawingMode = (selectedTab == EditorTool.DRAW),
                         modifier = Modifier.fillMaxSize()
@@ -1359,6 +1372,41 @@ fun CollageEditorScreen(
                 }
             )
         }
+    }
+}
+
+fun getFilterTintColor(preset: String): Color {
+    return when (preset) {
+        "Clarendon" -> Color(0xFF38BDF8)
+        "Gingham" -> Color(0xFFF1F5F9)
+        "Moon" -> Color(0xFF94A3B8)
+        "Lark" -> Color(0xFFFDE047)
+        "Reyes" -> Color(0xFFFED7AA)
+        "Juno" -> Color(0xFF60A5FA)
+        "Slumber" -> Color(0xFFCBD5E1)
+        "Crema" -> Color(0xFFFEF08A)
+        "Ludwig" -> Color(0xFFFCA5A5)
+        "Aden" -> Color(0xFFF472B6)
+        "Perpetua" -> Color(0xFF34D399)
+        "Amaro" -> Color(0xFFFCD34D)
+        "Mayfair" -> Color(0xFFFBCFE8)
+        "Rise" -> Color(0xFFFDE68A)
+        "Hudson" -> Color(0xFF93C5FD)
+        "Valencia" -> Color(0xFFFDBA74)
+        "X-Pro II" -> Color(0xFF818CF8)
+        "Sierra" -> Color(0xFFD8B4FE)
+        "Willow" -> Color(0xFFE2E8F0)
+        "Lo-fi" -> Color(0xFFF43F5E)
+        "Vivid" -> Color(0xFFE11D48)
+        "Golden" -> Color(0xFFF59E0B)
+        "Retro" -> Color(0xFF9A3412)
+        "Soft" -> Color(0xFFFBCFE8)
+        "Moody" -> Color(0xFF1E3A8A)
+        "Warm" -> Color(0xFFFB923C)
+        "Vintage" -> Color(0xFF78350F)
+        "B&W" -> Color.Gray
+        "Neon" -> Color(0xFF10B981)
+        else -> Color(0xFFE2E8F0)
     }
 }
 

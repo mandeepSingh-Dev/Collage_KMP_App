@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -164,32 +165,41 @@ fun CollageImageSlot(
             )
         }
 
-        // Sparkling Glitter Overlays
-        if (glitterDensity > 10f) {
+        // Distinct Glitter Overlays
+        if (glitterDensity > 0f) {
             Box(modifier = Modifier.fillMaxSize()) {
+                val tintColor = when (glitterCard) {
+                    "Diamond Glow" -> Color(0xFF38BDF8)
+                    "Heart Sparkle" -> Color(0xFFF43F5E)
+                    "Golden Shimmer" -> Color(0xFFF59E0B)
+                    "Dust" -> Color(0xFFFEF08A)
+                    else -> Color(0xFFFFD700)
+                }
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
                     contentDescription = null,
-                    tint = Color(0xFFFEF08A),
+                    tint = tintColor,
                     modifier = Modifier
-                        .size(28.dp)
+                        .size((20.dp * (glitterDensity / 50f)).coerceIn(16.dp, 36.dp))
                         .align(Alignment.TopStart)
                         .padding(8.dp)
                 )
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = Color(0xFFFFFFFF),
-                    modifier = Modifier
-                        .size(20.dp)
-                        .align(Alignment.BottomEnd)
-                        .padding(12.dp)
-                )
-                if (glitterDensity > 50f) {
+                if (glitterDensity > 30f) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
-                        tint = Color(0xFFFACC15),
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size((16.dp * (glitterDensity / 50f)).coerceIn(12.dp, 28.dp))
+                            .align(Alignment.BottomEnd)
+                            .padding(12.dp)
+                    )
+                }
+                if (glitterDensity > 70f) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = null,
+                        tint = tintColor,
                         modifier = Modifier
                             .size(24.dp)
                             .align(Alignment.Center)
