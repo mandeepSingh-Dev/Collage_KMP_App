@@ -100,9 +100,10 @@ object CollageRenderer {
         val content = RectF(outerSpacing, outerSpacing, w - outerSpacing, h - outerSpacing)
         val pad = innerSpacing / 2f
 
-        val photoPaint = PhotoLook.photoPaint(project.filterPreset, project.filterIntensity, project.adjustValues)
-        val vignette = PhotoColorEngine.vignetteStrength(project.filterPreset, project.filterIntensity)
-        val glow = PhotoColorEngine.glowStrength(project.filterPreset, project.filterIntensity)
+        // Same engine as the Compose preview -> what you see is what you export
+        val matrix = PhotoColorEngine.buildMatrix(project.filterPreset, project.filterIntensity, project.adjustValues)
+        val fx = PhotoColorEngine.effects(project.filterPreset, project.filterIntensity, project.adjustValues)
+        val exportScale = (w / 1080f).coerceAtLeast(1f)
 
         project.slots.forEachIndexed { index, slot ->
             val photoTransform = project.photos.getOrNull(index)
@@ -143,15 +144,14 @@ object CollageRenderer {
                     canvas.rotate(photoTransform.rotation, rect.centerX(), rect.centerY())
                 }
                 val dest = RectF(cx - pw / 2f, cy - ph / 2f, cx + pw / 2f, cy + ph / 2f)
-                canvas.drawBitmap(photoBitmap, null, dest, photoPaint)
-                PhotoLook.drawGlow(canvas, photoBitmap, dest, photoPaint.colorFilter, glow)
+                PhotoLook.drawPhoto(canvas, photoBitmap, dest, rect, userScale, matrix, fx, exportScale)
                 canvas.restore()
             } else {
                 val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.LTGRAY }
                 canvas.drawRect(rect, placeholderPaint)
             }
 
-            PhotoLook.drawVignette(canvas, rect, vignette)
+            PhotoLook.drawVignette(canvas, rect, fx.vignette)
 
             canvas.restore()
         }

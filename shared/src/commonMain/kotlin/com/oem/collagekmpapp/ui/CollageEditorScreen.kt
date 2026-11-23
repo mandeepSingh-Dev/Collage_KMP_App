@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.AdjustTools
 import com.oem.collagekmpapp.FilterPickerPanel
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberGalleryPicker
@@ -139,6 +140,7 @@ fun CollageEditorScreen(
 
     // Color Grading / Adjust states with -50 to 50 range and neutral at 0
     var selectedAdjustItem by remember { mutableStateOf("Brightness") }
+    var selectedAdjustGroup by remember { mutableStateOf("Light") }
     var adjustValues by remember { mutableStateOf(mapOf(
         "Brightness" to 0f,
         "Contrast" to 0f,
@@ -209,14 +211,39 @@ fun CollageEditorScreen(
     val fontCards = listOf("Modern", "Script", "Bold", "Retro", "Serif", "Neon")
 
     val adjustOptions = listOf(
+        // Light
         AdjustOption("Brightness", Icons.Default.WbSunny),
         AdjustOption("Contrast", Icons.Default.Contrast),
+        AdjustOption("Exposure", Icons.Default.Exposure),
         AdjustOption("Highlight", Icons.Default.LightMode),
         AdjustOption("Shadow", Icons.Default.Brightness2),
+        AdjustOption("Whites", Icons.Default.Brightness7),
+        AdjustOption("Blacks", Icons.Default.Brightness3),
+        AdjustOption("Dehaze", Icons.Default.FilterDrama),
+        // Color
         AdjustOption("Saturation", Icons.Default.Palette),
+        AdjustOption("Hue", Icons.Default.ColorLens),
         AdjustOption("Warmth", Icons.Default.WbIncandescent),
         AdjustOption("Tint", Icons.Default.Gradient),
+        AdjustOption("Red", Icons.Default.Lens),
+        AdjustOption("Green", Icons.Default.Lens),
+        AdjustOption("Blue", Icons.Default.Lens),
+        AdjustOption("Sepia", Icons.Default.FilterVintage),
+        // Detail
+        AdjustOption("Clarity", Icons.Default.Hd),
+        AdjustOption("Sharpen", Icons.Default.ChangeHistory),
+        AdjustOption("Blur", Icons.Default.BlurLinear),
+        AdjustOption("Soften", Icons.Default.Face),
+        // Effects
+        AdjustOption("Glow", Icons.Default.AutoAwesome),
+        AdjustOption("Grain", Icons.Default.Grain),
+        AdjustOption("Vignette", Icons.Default.Vignette),
         AdjustOption("Fade", Icons.Default.BlurOn)
+    )
+    val adjustIconTints = mapOf(
+        "Red" to Color(0xFFEF4444),
+        "Green" to Color(0xFF22C55E),
+        "Blue" to Color(0xFF3B82F6)
     )
 
     val emojis = listOf("😍", "😎", "🔥", "✨", "🥳", "👑", "🌈", "⭐", "🦋")
@@ -548,30 +575,83 @@ fun CollageEditorScreen(
                             }
                         }
                         EditorTool.ADJUST -> {
+                            val adjustDef = AdjustTools.def(selectedAdjustItem)
+                            val currentValue = adjustValues[selectedAdjustItem] ?: 0f
                             Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                val currentValue = adjustValues[selectedAdjustItem] ?: 0f
                                 Column(modifier = Modifier.fillMaxWidth()) {
-                                    Text("$selectedAdjustItem: ${if (currentValue > 0) "+" else ""}${currentValue.toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "$selectedAdjustItem: ${if (currentValue > 0 && adjustDef.isBipolar) "+" else ""}${currentValue.toInt()}%",
+                                            fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            "Reset all",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color(0xFF2563EB),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { adjustValues = emptyMap() }
+                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.height(2.dp))
                                     FluidSlider(
                                         value = currentValue,
                                         onValueChange = { newVal ->
                                             adjustValues = adjustValues + (selectedAdjustItem to newVal)
                                         },
-                                        valueRange = -50f..50f,
+                                        valueRange = adjustDef.min..adjustDef.max,
                                         modifier = Modifier.fillMaxWidth().height(36.dp)
                                     )
                                 }
 
+                                // group tabs: Light / Color / Detail / Effects
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(AdjustTools.groups) { group ->
+                                        val active = group == selectedAdjustGroup
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(if (active) Color(0xFF0F172A) else Color(0xFFF1F5F9))
+                                                .clickable {
+                                                    selectedAdjustGroup = group
+                                                    AdjustTools.inGroup(group).firstOrNull()?.let { selectedAdjustItem = it.name }
+                                                }
+                                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = group,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (active) Color.White else Color(0xFF475569)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                val groupNames = remember(selectedAdjustGroup) {
+                                    AdjustTools.inGroup(selectedAdjustGroup).map { it.name }
+                                }
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    items(adjustOptions) { option ->
+                                    items(adjustOptions.filter { it.name in groupNames }) { option ->
                                         val isSelected = selectedAdjustItem == option.name
+                                        val isActive = (adjustValues[option.name] ?: 0f) != 0f
                                         Box(
                                             modifier = Modifier
                                                 .width(72.dp)
@@ -600,7 +680,8 @@ fun CollageEditorScreen(
                                                 Icon(
                                                     imageVector = option.icon,
                                                     contentDescription = option.name,
-                                                    tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF475569),
+                                                    tint = adjustIconTints[option.name]
+                                                        ?: if (isSelected) Color(0xFF2563EB) else Color(0xFF475569),
                                                     modifier = Modifier.size(24.dp)
                                                 )
                                                 Spacer(modifier = Modifier.height(4.dp))
@@ -609,6 +690,17 @@ fun CollageEditorScreen(
                                                     fontSize = 11.sp,
                                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                     color = if (isSelected) Color(0xFF2563EB) else Color(0xFF334155)
+                                                )
+                                            }
+                                            // dot = this tool is currently applied
+                                            if (isActive) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(6.dp)
+                                                        .size(7.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(0xFF2563EB))
                                                 )
                                             }
                                         }

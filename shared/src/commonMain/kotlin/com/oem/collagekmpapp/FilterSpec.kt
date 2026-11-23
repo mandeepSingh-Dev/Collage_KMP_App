@@ -159,6 +159,31 @@ object PhotoColorEngine {
         return ((PhotoFilters.specs[preset]?.glow ?: 0f) * t).coerceIn(0f, 1f)
     }
 
+    /** Everything that is NOT a plain colour matrix (blur, sharpen, grain, vignette, glow...). */
+    fun effects(preset: String, intensity: Float, adjustValues: Map<String, Float>): PhotoEffects {
+        fun n(name: String) = AdjustTools.norm(adjustValues, name)
+        return PhotoEffects(
+            blur = n("Blur"),
+            sharpen = n("Sharpen"),
+            clarity = n("Clarity"),
+            soften = n("Soften"),
+            grain = n("Grain"),
+            vignette = (vignetteStrength(preset, intensity) + n("Vignette") * 0.8f).coerceIn(-0.85f, 0.85f),
+            glow = (glowStrength(preset, intensity) + n("Glow")).coerceIn(0f, 1f)
+        )
+    }
+
+    /** Matrix that applies [m] and then inverts the result (used to build high-pass layers). */
+    fun inverted(m: FloatArray?): FloatArray {
+        val inv = floatArrayOf(
+            -1f, 0f, 0f, 0f, 255f,
+            0f, -1f, 0f, 0f, 255f,
+            0f, 0f, -1f, 0f, 255f,
+            0f, 0f, 0f, 1f, 0f
+        )
+        return concat(inv, m ?: IDENTITY)
+    }
+
     // ---------------------------------------------------------------- filter preset
 
     private fun specToMatrix(s: FilterSpec): FloatArray {
@@ -185,27 +210,53 @@ object PhotoColorEngine {
     // ---------------------------------------------------------------- adjust tab
 
     private fun adjustMatrix(v: Map<String, Float>): FloatArray? {
-        fun a(name: String) = ((v[name] ?: 0f) / ADJUST_RANGE).coerceIn(-1f, 1f)
+        fun a(name: String) = AdjustTools.norm(v, name)
         val brightness = a("Brightness")
         val contrast = a("Contrast")
+        val exposure = a("Exposure")
         val highlight = a("Highlight")
         val shadow = a("Shadow")
+        val whites = a("Whites")
+        val blacks = a("Blacks")
+        val dehaze = a("Dehaze")
         val saturation = a("Saturation")
+        val hue = a("Hue")
         val warmth = a("Warmth")
         val tint = a("Tint")
+        val red = a("Red")
+        val green = a("Green")
+        val blue = a("Blue")
+        val sepia = a("Sepia")
         val fade = a("Fade")
-        val all = floatArrayOf(brightness, contrast, highlight, shadow, saturation, warmth, tint, fade)
+        val all = floatArrayOf(brightness, contrast, exposure, highlight, shadow, whites, blacks, dehaze,
+            saturation, hue, warmth, tint, red, green, blue, sepia, fade)
         if (all.all { kotlin.math.abs(it) < 0.001f }) return null
 
         var m = IDENTITY
+        // ---- colour
         m = concat(saturationM(1f + saturation), m)
+        if (hue != 0f) m = concat(hueM(hue * 180f), m)
         m = concat(diag(1f + .18f * warmth, 1f + .03f * warmth, 1f - .18f * warmth, 0f, 0f, 0f), m)
         m = concat(diag(1f + .04f * tint, 1f - .12f * tint, 1f + .04f * tint, 0f, 0f, 0f), m)
-        // Shadow: pivot at white -> mostly moves dark pixels
-        val sg = 1f - .15f * shadow
+        m = concat(diag(1f + .30f * red, 1f + .30f * green, 1f + .30f * blue, 0f, 0f, 0f), m)
+        if (sepia > 0f) m = concat(lerp(IDENTITY, SEPIA, sepia), m)
+        // ---- tone
+        val sg = 1f - .15f * shadow                       // Shadow: pivot at white
         m = concat(allChannels(sg, 255f * (1f - sg)), m)
-        // Highlight: pivot at black -> mostly moves bright pixels
-        m = concat(allChannels(1f + .20f * highlight, 0f), m)
+        m = concat(allChannels(1f + .20f * highlight, 0f), m)   // Highlight: pivot at black
+        val wp = 1f - .20f * whites                        // Whites: white point
+        m = concat(allChannels(1f / wp, 0f), m)
+        val bp = .12f * blacks                             // Blacks: black point
+        val bg = 1f / (1f - bp)
+        m = concat(allChannels(bg, -bp * 255f * bg), m)
+        if (dehaze != 0f) {                                // Dehaze: contrast + colour + deeper blacks
+            m = concat(saturationM(1f + .20f * dehaze), m)
+            m = concat(contrastM(.35f * dehaze), m)
+            val dbp = .06f * dehaze
+            val dg = 1f / (1f - dbp)
+            m = concat(allChannels(dg, -dbp * 255f * dg), m)
+        }
+        m = concat(allChannels(kotlin.math.exp(exposure * 0.6931472f), 0f), m)   // Exposure: 2^e (gain only)
         m = concat(contrastM(contrast), m)
         m = concat(brightnessM(brightness), m)
         m = concat(fadeM(fade * 0.2f), m)
@@ -213,6 +264,29 @@ object PhotoColorEngine {
     }
 
     // ---------------------------------------------------------------- building blocks
+
+    private val SEPIA = floatArrayOf(
+        .393f, .769f, .189f, 0f, 0f,
+        .349f, .686f, .168f, 0f, 0f,
+        .272f, .534f, .131f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f
+    )
+
+    /** Standard luminance-preserving hue rotation (same as SVG feColorMatrix hueRotate). */
+    private fun hueM(deg: Float): FloatArray {
+        val rad = deg.toDouble() * kotlin.math.PI / 180.0
+        val c = kotlin.math.cos(rad).toFloat()
+        val s = kotlin.math.sin(rad).toFloat()
+        val lr = .213f
+        val lg = .715f
+        val lb = .072f
+        return floatArrayOf(
+            lr + c * (1f - lr) + s * -lr, lg + c * -lg + s * -lg, lb + c * -lb + s * (1f - lb), 0f, 0f,
+            lr + c * -lr + s * .143f, lg + c * (1f - lg) + s * .140f, lb + c * -lb + s * -.283f, 0f, 0f,
+            lr + c * -lr + s * -(1f - lr), lg + c * -lg + s * lg, lb + c * (1f - lb) + s * lb, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+        )
+    }
 
     private fun allChannels(gain: Float, offset: Float) = diag(gain, gain, gain, offset, offset, offset)
 
@@ -266,4 +340,97 @@ object PhotoColorEngine {
 
     private fun lerp(a: FloatArray, b: FloatArray, t: Float) =
         FloatArray(20) { a[it] + (b[it] - a[it]) * t }
+}
+
+// =====================================================================================
+//  ADJUST TAB DEFINITIONS (UI + engine read the same list, so ranges never drift)
+// =====================================================================================
+
+data class AdjustDef(val name: String, val group: String, val min: Float, val max: Float) {
+    val isBipolar: Boolean get() = min < 0f
+
+    /** -1..1 for two-sided tools, 0..1 for one-sided tools. */
+    fun normalize(v: Float): Float =
+        if (isBipolar) (v / max).coerceIn(-1f, 1f) else (v / max).coerceIn(0f, 1f)
+}
+
+object AdjustTools {
+    val groups = listOf("Light", "Color", "Detail", "Effects")
+
+    val all: List<AdjustDef> = listOf(
+        // Light
+        AdjustDef("Brightness", "Light", -50f, 50f),
+        AdjustDef("Contrast", "Light", -50f, 50f),
+        AdjustDef("Exposure", "Light", -50f, 50f),
+        AdjustDef("Highlight", "Light", -50f, 50f),
+        AdjustDef("Shadow", "Light", -50f, 50f),
+        AdjustDef("Whites", "Light", -50f, 50f),
+        AdjustDef("Blacks", "Light", -50f, 50f),
+        AdjustDef("Dehaze", "Light", -50f, 50f),
+        // Color
+        AdjustDef("Saturation", "Color", -50f, 50f),
+        AdjustDef("Hue", "Color", -50f, 50f),
+        AdjustDef("Warmth", "Color", -50f, 50f),
+        AdjustDef("Tint", "Color", -50f, 50f),
+        AdjustDef("Red", "Color", -50f, 50f),
+        AdjustDef("Green", "Color", -50f, 50f),
+        AdjustDef("Blue", "Color", -50f, 50f),
+        AdjustDef("Sepia", "Color", 0f, 100f),
+        // Detail
+        AdjustDef("Clarity", "Detail", -50f, 50f),
+        AdjustDef("Sharpen", "Detail", 0f, 100f),
+        AdjustDef("Blur", "Detail", 0f, 100f),
+        AdjustDef("Soften", "Detail", 0f, 100f),
+        // Effects
+        AdjustDef("Glow", "Effects", 0f, 100f),
+        AdjustDef("Grain", "Effects", 0f, 100f),
+        AdjustDef("Vignette", "Effects", -50f, 50f),
+        AdjustDef("Fade", "Effects", -50f, 50f)
+    )
+
+    private val byName: Map<String, AdjustDef> = all.associateBy { it.name }
+
+    fun def(name: String): AdjustDef = byName[name] ?: AdjustDef(name, "Light", -50f, 50f)
+    fun inGroup(group: String): List<AdjustDef> = all.filter { it.group == group }
+    fun norm(values: Map<String, Float>, name: String): Float = def(name).normalize(values[name] ?: 0f)
+}
+
+/** Spatial / texture effects that a colour matrix cannot express. All values pre-normalised. */
+data class PhotoEffects(
+    val blur: Float = 0f,       // 0..1
+    val sharpen: Float = 0f,    // 0..1
+    val clarity: Float = 0f,    // -1..1 (negative = dreamy soft)
+    val soften: Float = 0f,     // 0..1
+    val grain: Float = 0f,      // 0..1
+    val vignette: Float = 0f,   // -1..1 (negative = white vignette)
+    val glow: Float = 0f        // 0..1
+) {
+    val hasSpatial: Boolean
+        get() = blur > 0.01f || soften > 0.01f || kotlin.math.abs(clarity) > 0.01f || sharpen > 0.01f || glow > 0.01f
+
+    companion object { val None = PhotoEffects() }
+}
+
+/** Blur radii as a fraction of slot width -> preview (Compose) and export (Canvas) match at any resolution. */
+object EffectRadii {
+    const val BLUR = 0.04f
+    const val SOFTEN = 0.012f
+    const val CLARITY = 0.03f
+    const val SHARPEN = 0.004f
+    const val GLOW = 0.03f
+}
+
+/** Deterministic film-grain tile shared by preview and export. */
+object GrainPattern {
+    const val SIZE = 256
+    val values: IntArray by lazy {
+        var seed = 0x2545F491
+        fun next(): Int {
+            seed = seed xor (seed shl 13)
+            seed = seed xor (seed ushr 17)
+            seed = seed xor (seed shl 5)
+            return (seed ushr 8) and 255
+        }
+        IntArray(SIZE * SIZE) { (next() + next()) / 2 }   // triangular distribution = softer, more film-like
+    }
 }

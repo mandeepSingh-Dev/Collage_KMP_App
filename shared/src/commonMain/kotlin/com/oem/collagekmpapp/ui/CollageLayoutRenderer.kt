@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.FilteredPhoto
 import com.oem.collagekmpapp.PhotoColorEngine
+import com.oem.collagekmpapp.PhotoEffects
 import com.oem.collagekmpapp.model.CollageLayout
 import com.oem.collagekmpapp.model.Slot
 
@@ -149,17 +150,13 @@ fun CollageImageSlot(
     var scale by remember(initialScale) { mutableStateOf(initialScale) }
     var offset by remember(initialOffset) { mutableStateOf(initialOffset) }
 
-    // Real per-pixel colour grading: filter preset + Adjust tab merged into ONE color matrix.
-    // The same matrix is used by the exporter, so preview == saved image.
-    val photoColorFilter = remember(filterPreset, filterIntensity, adjustValues) {
+    // Real per-pixel grading (filter + all Adjust tools) -> ONE colour matrix,
+    // plus spatial effects (blur, sharpen, grain, vignette...). Exporter uses the same engine.
+    val matrix = remember(filterPreset, filterIntensity, adjustValues) {
         PhotoColorEngine.buildMatrix(filterPreset, filterIntensity, adjustValues)
-            ?.let { ColorFilter.colorMatrix(ColorMatrix(it)) }
     }
-    val vignette = remember(filterPreset, filterIntensity) {
-        PhotoColorEngine.vignetteStrength(filterPreset, filterIntensity)
-    }
-    val glow = remember(filterPreset, filterIntensity) {
-        PhotoColorEngine.glowStrength(filterPreset, filterIntensity)
+    val effects = remember(filterPreset, filterIntensity, adjustValues) {
+        PhotoColorEngine.effects(filterPreset, filterIntensity, adjustValues)
     }
 
     val boxModifier = modifier
@@ -181,9 +178,8 @@ fun CollageImageSlot(
     Box(modifier = finalModifier) {
         FilteredPhoto(
             uri = uri,
-            colorFilter = photoColorFilter,
-            vignette = vignette,
-            glow = glow,
+            matrix = matrix,
+            effects = effects,
             modifier = Modifier.fillMaxSize(),
             imageModifier = Modifier.graphicsLayer(
                 scaleX = scale,
