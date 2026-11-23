@@ -29,6 +29,13 @@ expect class ImageSharer {
         selectedFont: String,
         textOffset: Offset
     )
+    fun saveProject(
+        project: com.oem.collagekmpapp.model.CollageProject,
+        quality: String,
+        format: String,
+        onSuccess: (uri: String) -> Unit,
+        onError: (Throwable) -> Unit
+    )
     fun shareToApp(appName: String, imageUrl: String)
 }
 

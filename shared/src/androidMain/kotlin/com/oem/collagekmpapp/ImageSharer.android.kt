@@ -17,6 +17,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import com.oem.collagekmpapp.model.Slot
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 actual class ImageSharer(private val context: android.content.Context) {
     actual fun saveToGallery(
@@ -264,6 +267,28 @@ actual class ImageSharer(private val context: android.content.Context) {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    actual fun saveProject(
+        project: com.oem.collagekmpapp.model.CollageProject,
+        quality: String,
+        format: String,
+        onSuccess: (uri: String) -> Unit,
+        onError: (Throwable) -> Unit
+    ) {
+        val longSide = when {
+            quality.contains("4K", ignoreCase = true) || quality.contains("Ultra", ignoreCase = true) -> 3840
+            quality.contains("2K", ignoreCase = true) -> 2048
+            else -> 1080
+        }
+        CoroutineScope(Dispatchers.Main).launch {
+            val result = com.oem.collagekmpapp.export.CollageExporter.export(context, project, longSide, format)
+            result.onSuccess { uri ->
+                onSuccess(uri.toString())
+            }.onFailure { err ->
+                onError(err)
+            }
         }
     }
 

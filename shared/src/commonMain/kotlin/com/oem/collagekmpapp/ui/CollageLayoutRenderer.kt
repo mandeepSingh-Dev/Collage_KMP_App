@@ -42,6 +42,8 @@ fun RenderCollageLayout(
     selectedSlotIndex: Int? = null,
     onSelectSlot: ((Int?) -> Unit)? = null,
     onSlotsChanged: ((List<Slot>) -> Unit)? = null,
+    photoTransforms: Map<Int, com.oem.collagekmpapp.model.PhotoTransform>? = null,
+    onPhotoTransformChanged: ((Int, com.oem.collagekmpapp.model.PhotoTransform) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
@@ -72,6 +74,7 @@ fun RenderCollageLayout(
                 val slotHeightDp = maxHeightDp * (slot.bottom - slot.top)
                 val offsetXDp = maxWidthDp * slot.left
                 val offsetYDp = maxHeightDp * slot.top
+                val currentTransform = photoTransforms?.get(index)
 
                 Box(
                     modifier = Modifier
@@ -97,6 +100,19 @@ fun RenderCollageLayout(
                         glitterCard = glitterCard,
                         glitterDensity = glitterDensity,
                         isDrawingMode = isDrawingMode,
+                        initialScale = currentTransform?.scale ?: 1f,
+                        initialOffset = if (currentTransform != null) Offset(currentTransform.panX * slotWidthDp.value, currentTransform.panY * slotHeightDp.value) else Offset.Zero,
+                        onTransformChanged = { newScale, newOffset ->
+                            val normPanX = if (slotWidthDp.value > 0f) newOffset.x / slotWidthDp.value else 0f
+                            val normPanY = if (slotHeightDp.value > 0f) newOffset.y / slotHeightDp.value else 0f
+                            onPhotoTransformChanged?.invoke(index, com.oem.collagekmpapp.model.PhotoTransform(
+                                uri = photoUri,
+                                panX = normPanX,
+                                panY = normPanY,
+                                scale = newScale,
+                                rotation = 0f
+                            ))
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -114,10 +130,13 @@ fun CollageImageSlot(
     glitterCard: String,
     glitterDensity: Float,
     isDrawingMode: Boolean = false,
+    initialScale: Float = 1f,
+    initialOffset: Offset = Offset.Zero,
+    onTransformChanged: ((scale: Float, offset: Offset) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    var scale by remember(initialScale) { mutableStateOf(initialScale) }
+    var offset by remember(initialOffset) { mutableStateOf(initialOffset) }
 
     val boxModifier = modifier
         .clip(RoundedCornerShape(cornerRadius))
@@ -128,6 +147,7 @@ fun CollageImageSlot(
             detectTransformGestures { _, pan, zoom, _ ->
                 scale = (scale * zoom).coerceIn(0.5f, 4f)
                 offset += pan
+                onTransformChanged?.invoke(scale, offset)
             }
         }
     } else {

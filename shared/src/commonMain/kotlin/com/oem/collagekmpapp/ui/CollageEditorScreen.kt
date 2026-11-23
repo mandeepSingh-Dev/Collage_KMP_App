@@ -36,12 +36,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -114,6 +117,8 @@ fun CollageEditorScreen(
     var selectedSlotIndex by remember(currentLayoutId) { mutableStateOf<Int?>(null) }
     var aspectRatio by remember { mutableStateOf(AspectRatio.SQUARE) }
     var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
+    var photoTransforms by remember { mutableStateOf<Map<Int, PhotoTransform>>(emptyMap()) }
+    var canvasSizePx by remember { mutableStateOf(IntSize.Zero) }
 
     // Filter & Glitter states
     var filterIntensity by remember { mutableStateOf(0f) }
@@ -458,7 +463,7 @@ fun CollageEditorScreen(
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             modifier = Modifier.clickable {
                                                 selectedPreset = preset
-                                                filterIntensity = 50f
+                                                filterIntensity = if (preset == "Original") 0f else 50f
                                             }
                                         ) {
                                             Box(
@@ -1094,6 +1099,9 @@ fun CollageEditorScreen(
                     .clip(RoundedCornerShape(borderSettings.cornerRadius.dp))
                     .then(bgModifier)
                     .alpha(fadeVal.coerceIn(0.4f, 1f))
+                    .onGloballyPositioned { coordinates ->
+                        canvasSizePx = coordinates.size
+                    }
                     .pointerInput(selectedTab, selectedBrushType, brushColor, brushDensity) {
                         if (selectedTab == EditorTool.DRAW)
                         {
@@ -1177,6 +1185,10 @@ fun CollageEditorScreen(
                         selectedSlotIndex = selectedSlotIndex,
                         onSelectSlot = { selectedSlotIndex = it },
                         onSlotsChanged = { currentSlots = it },
+                        photoTransforms = photoTransforms,
+                        onPhotoTransformChanged = { idx, trans ->
+                            photoTransforms = photoTransforms + (idx to trans)
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -1259,20 +1271,26 @@ fun CollageEditorScreen(
                             .offset { IntOffset(itemOffset.x.toInt(), itemOffset.y.toInt()) }
                             .rotate(itemRotation)
                             .scale(itemScale)
-                            .pointerInput(item.id) {
-                                detectDragGestures { _, dragAmount ->
-                                    selectedOverlayId = item.id
-                                    itemOffset += dragAmount
-                                    overlayItems = overlayItems.map {
-                                        if (it.id == item.id) {
-                                            when (it) {
-                                                is OverlayItem.Emoji -> it.copy(offset = itemOffset)
-                                                is OverlayItem.Photo -> it.copy(offset = itemOffset)
+                            .then(
+                                if (selectedTab != EditorTool.DRAW) {
+                                    Modifier.pointerInput(item.id) {
+                                        detectDragGestures { _, dragAmount ->
+                                            selectedOverlayId = item.id
+                                            itemOffset += dragAmount
+                                            overlayItems = overlayItems.map {
+                                                if (it.id == item.id) {
+                                                    when (it) {
+                                                        is OverlayItem.Emoji -> it.copy(offset = itemOffset)
+                                                        is OverlayItem.Photo -> it.copy(offset = itemOffset)
+                                                    }
+                                                } else it
                                             }
-                                        } else it
+                                        }
                                     }
+                                } else {
+                                    Modifier
                                 }
-                            }
+                            )
                             .clickable { selectedOverlayId = item.id }
                             .border(
                                 width = if (isSelected) 1.5.dp else 0.dp,
@@ -1403,11 +1421,17 @@ fun CollageEditorScreen(
                         modifier = Modifier
                             .align(Alignment.Center)
                             .offset { IntOffset(textOffset.x.toInt(), textOffset.y.toInt()) }
-                            .pointerInput(Unit) {
-                                detectDragGestures { _, dragAmount ->
-                                    textOffset += dragAmount
+                            .then(
+                                if (selectedTab != EditorTool.DRAW) {
+                                    Modifier.pointerInput(Unit) {
+                                        detectDragGestures { _, dragAmount ->
+                                            textOffset += dragAmount
+                                        }
+                                    }
+                                } else {
+                                    Modifier
                                 }
-                            }
+                            )
                             .border(1.5.dp, Color(0xFF2563EB), RoundedCornerShape(4.dp))
                             .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -1451,8 +1475,84 @@ fun CollageEditorScreen(
         }
 
         if (showExportDialog) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val canvasWidthDp = if (canvasSizePx.width > 0) with(density) { canvasSizePx.width.toDp().value } else 320f
+            val currentCanvasW = if (canvasSizePx.width > 0) canvasSizePx.width.toFloat() else 1000f
+            val currentCanvasH = if (canvasSizePx.height > 0) canvasSizePx.height.toFloat() else 1000f
+
+            val textSizeSp = when (selectedFont) { "Bold" -> 32f; "Retro" -> 26f; "Neon" -> 30f; else -> 28f }
+            val textSizePx = with(density) { textSizeSp.sp.toPx() }
+
+            val project = CollageProject(
+                layoutId = currentLayoutId,
+                slots = currentSlots,
+                photos = selectedPhotos.mapIndexed { i, uri ->
+                    photoTransforms[i]?.copy(uri = uri) ?: PhotoTransform(uri = uri)
+                },
+                aspectRatioWidth = aspectRatio.widthRatio,
+                aspectRatioHeight = aspectRatio.heightRatio,
+                outerSpacingRatio = borderSettings.outerSpacing / canvasWidthDp,
+                innerSpacingRatio = borderSettings.spacing / canvasWidthDp,
+                cornerRadiusRatio = borderSettings.cornerRadius / canvasWidthDp,
+                backgroundColorLong = canvasBgColor.toArgb().toLong(),
+                backgroundGradientColors = canvasBgGradientColors.map { it.toArgb().toLong() },
+                backgroundPhotoUri = selectedBackgroundPhoto,
+                backgroundFade = backgroundFade,
+                filterPreset = selectedPreset,
+                filterIntensity = filterIntensity,
+                adjustValues = adjustValues,
+                overlays = overlayItems.map { item ->
+                    val nx = (currentCanvasW / 2f + item.offset.x) / currentCanvasW
+                    val ny = (currentCanvasH / 2f + item.offset.y) / currentCanvasH
+                    when (item) {
+                        is OverlayItem.Emoji -> ProjectOverlayItem.Emoji(
+                            id = item.id,
+                            emoji = item.emoji,
+                            x = nx,
+                            y = ny,
+                            rotation = item.rotation,
+                            scale = item.scale
+                        )
+                        is OverlayItem.Photo -> ProjectOverlayItem.Photo(
+                            id = item.id,
+                            uri = item.uri,
+                            x = nx,
+                            y = ny,
+                            rotation = item.rotation,
+                            scale = item.scale
+                        )
+                    }
+                },
+                textLayers = if (collageText.isNotBlank()) listOf(
+                    ProjectTextLayer(
+                        text = collageText,
+                        x = (currentCanvasW / 2f + textOffset.x) / currentCanvasW,
+                        y = (currentCanvasH / 2f + textOffset.y) / currentCanvasH,
+                        fontName = selectedFont,
+                        colorLong = textColor.toArgb().toLong(),
+                        fontSizeRatio = textSizePx / currentCanvasW
+                    )
+                ) else emptyList(),
+                drawStrokes = drawStrokes.map { stroke ->
+                    NormalizedDrawStroke(
+                        points = stroke.points.map { pt ->
+                            NormalizedPoint(
+                                x = pt.x / currentCanvasW,
+                                y = pt.y / currentCanvasH
+                            )
+                        },
+                        colorLong = stroke.color
+                            .copy(alpha = stroke.color.alpha * brushOpacity / 100f)
+                            .toArgb().toLong(),
+                        strokeWidthRatio = stroke.strokeWidth / currentCanvasW,
+                        isEraser = stroke.isEraser
+                    )
+                }
+            )
+
             Box(modifier = Modifier.fillMaxSize().zIndex(100f).background(Color.White)) {
                 ExportShareScreen(
+                    project = project,
                     layoutId = currentLayoutId,
                     selectedPhotos = selectedPhotos,
                     slots = currentSlots,

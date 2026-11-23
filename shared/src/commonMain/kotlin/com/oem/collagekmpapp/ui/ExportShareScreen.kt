@@ -23,13 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.oem.collagekmpapp.model.Slot
+import com.oem.collagekmpapp.model.*
 import com.oem.collagekmpapp.rememberImageSharer
 
 data class QualityPreset(val title: String, val size: String)
@@ -38,6 +39,7 @@ data class ShareApp(val name: String, val color: Color, val icon: ImageVector)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExportShareScreen(
+    project: CollageProject? = null,
     layoutId: String = "2_grid",
     selectedPhotos: List<String>,
     slots: List<Slot> = emptyList(),
@@ -68,6 +70,59 @@ fun ExportShareScreen(
     var exportFormat by remember { mutableStateOf("JPG") }
     var copiedToast by remember { mutableStateOf(false) }
     var isSavedToGallery by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+    var exportError by remember { mutableStateOf<String?>(null) }
+    var exportedUri by remember { mutableStateOf<String?>(null) }
+
+    val resolvedProject = remember(
+        project, layoutId, selectedPhotos, slots, spacingDp, outerSpacingDp, cornerRadiusDp,
+        filterPreset, filterIntensity, backgroundPhoto, backgroundFade, backgroundColor,
+        backgroundGradientColors, aspectRatioWidth, aspectRatioHeight, adjustValues,
+        overlayItems, drawStrokes, collageText, textColor, selectedFont, textOffset
+    ) {
+        project ?: CollageProject(
+            layoutId = layoutId,
+            slots = slots,
+            photos = selectedPhotos.map { PhotoTransform(uri = it) },
+            aspectRatioWidth = aspectRatioWidth,
+            aspectRatioHeight = aspectRatioHeight,
+            outerSpacingRatio = outerSpacingDp / 320f,
+            innerSpacingRatio = spacingDp / 320f,
+            cornerRadiusRatio = cornerRadiusDp / 320f,
+            backgroundColorLong = backgroundColor.toArgb().toLong(),
+            backgroundGradientColors = backgroundGradientColors.map { it.toArgb().toLong() },
+            backgroundPhotoUri = backgroundPhoto,
+            backgroundFade = backgroundFade,
+            filterPreset = filterPreset,
+            filterIntensity = filterIntensity,
+            adjustValues = adjustValues,
+            overlays = overlayItems.map { item ->
+                val nx = 0.5f + (item.offset.x / 320f)
+                val ny = 0.5f + (item.offset.y / 320f)
+                when (item) {
+                    is OverlayItem.Emoji -> ProjectOverlayItem.Emoji(item.id, item.emoji, nx, ny, item.rotation, item.scale)
+                    is OverlayItem.Photo -> ProjectOverlayItem.Photo(item.id, item.uri, nx, ny, item.rotation, item.scale)
+                }
+            },
+            textLayers = if (collageText.isNotBlank()) listOf(
+                ProjectTextLayer(
+                    text = collageText,
+                    x = 0.5f + (textOffset.x / 320f),
+                    y = 0.5f + (textOffset.y / 320f),
+                    fontName = selectedFont,
+                    colorLong = textColor.toArgb().toLong()
+                )
+            ) else emptyList(),
+            drawStrokes = drawStrokes.map { stroke ->
+                NormalizedDrawStroke(
+                    points = stroke.points.map { pt -> NormalizedPoint(pt.x / 320f, pt.y / 320f) },
+                    colorLong = stroke.color.toArgb().toLong(),
+                    strokeWidthRatio = stroke.strokeWidth / 320f,
+                    isEraser = stroke.isEraser
+                )
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -123,93 +178,120 @@ fun ExportShareScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
+            val previewCardWidthDp = 220.dp
+            val previewCardHeightDp = previewCardWidthDp * (resolvedProject.aspectRatioHeight / resolvedProject.aspectRatioWidth)
+
             // Collage Preview Card rendering the EXACT styled collage with all fields applied
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.width(220.dp).aspectRatio(aspectRatioWidth / aspectRatioHeight)
+                modifier = Modifier.width(previewCardWidthDp).aspectRatio(aspectRatioWidth / aspectRatioHeight)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
-                            if (backgroundGradientColors.isNotEmpty()) androidx.compose.ui.graphics.Brush.linearGradient(backgroundGradientColors)
-                            else androidx.compose.ui.graphics.Brush.linearGradient(listOf(backgroundColor, backgroundColor))
+                            if (resolvedProject.backgroundGradientColors.isNotEmpty()) androidx.compose.ui.graphics.Brush.linearGradient(resolvedProject.backgroundGradientColors.map { Color(it.toInt()) })
+                            else androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(resolvedProject.backgroundColorLong.toInt()), Color(resolvedProject.backgroundColorLong.toInt())))
                         )
-                        .padding((outerSpacingDp / 2.5f).dp)
+                        .padding((resolvedProject.outerSpacingRatio * previewCardWidthDp.value).dp)
                 ) {
-                    if (backgroundPhoto != null) {
+                    if (resolvedProject.backgroundPhotoUri != null) {
                         AsyncImage(
-                            model = backgroundPhoto,
+                            model = resolvedProject.backgroundPhotoUri,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
                         )
                     }
-                    if (backgroundFade > 0f) {
+                    if (resolvedProject.backgroundFade > 0f) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.White.copy(alpha = (backgroundFade / 100f) * 0.7f))
+                                .background(Color.White.copy(alpha = (resolvedProject.backgroundFade / 100f) * 0.7f))
                         )
                     }
 
                     RenderCollageLayout(
-                        layoutId = layoutId,
+                        layoutId = resolvedProject.layoutId,
                         photos = selectedPhotos,
-                        spacing = (spacingDp / 2).dp,
-                        cornerRadius = (cornerRadiusDp / 2).dp,
-                        filterPreset = filterPreset,
-                        filterIntensity = filterIntensity,
+                        spacing = (resolvedProject.innerSpacingRatio * previewCardWidthDp.value).dp,
+                        cornerRadius = (resolvedProject.cornerRadiusRatio * previewCardWidthDp.value).dp,
+                        filterPreset = resolvedProject.filterPreset,
+                        filterIntensity = resolvedProject.filterIntensity,
                         glitterCard = "Glitz",
                         glitterDensity = 0f,
                         isDrawingMode = false,
-                        slots = slots,
+                        slots = resolvedProject.slots,
+                        photoTransforms = resolvedProject.photos.mapIndexed { idx, p -> idx to p }.toMap(),
                         modifier = Modifier.fillMaxSize()
                     )
 
                     // Overlay Items (stickers, emojis, photo stickers)
-                    overlayItems.forEach { item ->
-                        when (item) {
-                            is OverlayItem.Emoji -> {
-                                Text(
-                                    text = item.emoji,
-                                    fontSize = (18 * item.scale).sp,
-                                    modifier = Modifier
-                                        .offset(x = (item.offset.x / 2.5f).dp, y = (item.offset.y / 2.5f).dp)
-                                        .graphicsLayer(rotationZ = item.rotation)
-                                )
-                            }
-                            is OverlayItem.Photo -> {
-                                AsyncImage(
-                                    model = item.uri,
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size((36 * item.scale).dp)
-                                        .offset(x = (item.offset.x / 2.5f).dp, y = (item.offset.y / 2.5f).dp)
-                                        .graphicsLayer(rotationZ = item.rotation)
-                                )
+                    resolvedProject.overlays.forEach { item ->
+                        val itemOffsetX = (item.x - 0.5f) * previewCardWidthDp.value
+                        val itemOffsetY = (item.y - 0.5f) * previewCardHeightDp.value
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .offset(x = itemOffsetX.dp, y = itemOffsetY.dp)
+                                .graphicsLayer(rotationZ = item.rotation)
+                        ) {
+                            when (item) {
+                                is ProjectOverlayItem.Emoji -> {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                                            .padding(4.dp)
+                                    ) {
+                                        Text(
+                                            text = item.emoji,
+                                            fontSize = (item.scale * 0.11f * previewCardWidthDp.value).sp
+                                        )
+                                    }
+                                }
+                                is ProjectOverlayItem.Photo -> {
+                                    val sizeDp = (item.scale * 0.25f * previewCardWidthDp.value).dp
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                                            .padding(4.dp)
+                                    ) {
+                                        AsyncImage(
+                                            model = item.uri,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(sizeDp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
 
                     // Freehand Drawn Strokes
-                    if (drawStrokes.isNotEmpty()) {
+                    if (resolvedProject.drawStrokes.isNotEmpty()) {
                         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawStrokes.forEach { stroke ->
+                            val cw = size.width
+                            val ch = size.height
+                            resolvedProject.drawStrokes.forEach { stroke ->
                                 if (stroke.points.size > 1) {
                                     val path = androidx.compose.ui.graphics.Path().apply {
-                                        moveTo(stroke.points.first().x / 2.5f, stroke.points.first().y / 2.5f)
+                                        val first = stroke.points.first()
+                                        moveTo(first.x * cw, first.y * ch)
                                         for (i in 1 until stroke.points.size) {
-                                            lineTo(stroke.points[i].x / 2.5f, stroke.points[i].y / 2.5f)
+                                            lineTo(stroke.points[i].x * cw, stroke.points[i].y * ch)
                                         }
                                     }
                                     drawPath(
                                         path = path,
-                                        color = if (stroke.isEraser) Color.White else stroke.color,
+                                        color = if (stroke.isEraser) Color.White else Color(stroke.colorLong.toInt()),
                                         style = androidx.compose.ui.graphics.drawscope.Stroke(
-                                            width = stroke.strokeWidth / 2.5f,
+                                            width = stroke.strokeWidthRatio * cw,
                                             cap = androidx.compose.ui.graphics.StrokeCap.Round,
                                             join = androidx.compose.ui.graphics.StrokeJoin.Round
                                         )
@@ -218,18 +300,25 @@ fun ExportShareScreen(
                             }
                         }
                     }
-                    if (collageText.isNotBlank()) {
-                        Text(
-                            text = collageText,
-                            color = textColor,
-                            fontSize = when (selectedFont) { "Bold" -> 32.sp; "Retro" -> 26.sp; "Neon" -> 30.sp; else -> 28.sp },
-                            fontWeight = if (selectedFont == "Bold" || selectedFont == "Neon") FontWeight.Bold else FontWeight.Medium,
+
+                    resolvedProject.textLayers.forEach { textLayer ->
+                        val textOffsetX = (textLayer.x - 0.5f) * previewCardWidthDp.value
+                        val textOffsetY = (textLayer.y - 0.5f) * previewCardHeightDp.value
+
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.Center)
-                                .offset(x = (textOffset.x / 2.5f).dp, y = (textOffset.y / 2.5f).dp)
+                                .offset(x = textOffsetX.dp, y = textOffsetY.dp)
                                 .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = textLayer.text,
+                                color = Color(textLayer.colorLong.toInt()),
+                                fontSize = (textLayer.fontSizeRatio * previewCardWidthDp.value).sp,
+                                fontWeight = if (textLayer.fontName == "Bold" || textLayer.fontName == "Neon") FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -370,7 +459,7 @@ fun ExportShareScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
                                     .clickable {
-                                        sharer.shareToApp(app.name, selectedPhotos.firstOrNull() ?: "")
+                                        sharer.shareToApp(app.name, exportedUri ?: selectedPhotos.firstOrNull() ?: "")
                                     }
                                     .padding(4.dp)
                             ) {
@@ -420,41 +509,55 @@ fun ExportShareScreen(
                         Text("Link copied to clipboard!", fontSize = 11.sp, color = Color(0xFF16A34A))
                     }
 
+                    if (exportError != null) {
+                        Text(
+                            text = exportError ?: "Export failed",
+                            fontSize = 12.sp,
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(4.dp))
 
                     // Save to Gallery Button
                     Button(
                         onClick = {
-                            sharer.saveToGallery(
-                                layoutId = layoutId,
-                                photos = selectedPhotos,
-                                slots = slots,
-                                spacingDp = spacingDp,
-                                cornerRadiusDp = cornerRadiusDp,
-                                filterPreset = filterPreset,
-                                filterIntensity = filterIntensity,
-                                backgroundPhoto = backgroundPhoto,
-                                backgroundFade = backgroundFade,
-                                outerSpacingDp = outerSpacingDp,
-                                aspectRatioWidth = aspectRatioWidth,
-                                aspectRatioHeight = aspectRatioHeight,
-                                backgroundColor = backgroundColor,
-                                backgroundGradientColors = backgroundGradientColors,
-                                adjustValues = adjustValues,
-                                overlayItems = overlayItems,
-                                drawStrokes = drawStrokes,
-                                collageText = collageText,
-                                textColor = textColor,
-                                selectedFont = selectedFont,
-                                textOffset = textOffset
+                            isExporting = true
+                            exportError = null
+                            sharer.saveProject(
+                                project = resolvedProject,
+                                quality = exportQuality,
+                                format = exportFormat,
+                                onSuccess = { uri ->
+                                    isExporting = false
+                                    isSavedToGallery = true
+                                    exportedUri = uri
+                                },
+                                onError = { err ->
+                                    isExporting = false
+                                    exportError = err.message ?: "Export failed"
+                                }
                             )
-                            isSavedToGallery = true
                         },
+                        enabled = !isExporting,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().height(50.dp)
                     ) {
-                        Text("Save to Gallery", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        if (isExporting) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Exporting High-Res Image...", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        } else {
+                            Text("Save to Gallery", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
                     }
                 }
             }
