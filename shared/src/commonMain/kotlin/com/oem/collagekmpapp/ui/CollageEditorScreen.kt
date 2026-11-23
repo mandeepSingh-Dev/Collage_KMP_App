@@ -1074,22 +1074,7 @@ fun CollageEditorScreen(
                 else -> Modifier.background(canvasBgColor)
             }
 
-            val brightnessVal = (adjustValues["Brightness"] ?: 0f) / 50f
-            val contrastVal = (adjustValues["Contrast"] ?: 0f) / 50f
-            val highlightVal = (adjustValues["Highlight"] ?: 0f) / 50f
-            val shadowVal = (adjustValues["Shadow"] ?: 0f) / 50f
-            val saturationVal = (adjustValues["Saturation"] ?: 0f) / 50f
-            val warmthVal = (adjustValues["Warmth"] ?: 0f) / 50f
-            val tintVal = (adjustValues["Tint"] ?: 0f) / 50f
             val fadeVal = 1f - ((adjustValues["Fade"] ?: 0f) + 50f) / 100f * 0.3f
-
-            val brightnessColor = if (brightnessVal > 0f) Color.White.copy(alpha = brightnessVal * 0.35f) else Color.Black.copy(alpha = -brightnessVal * 0.35f)
-            val contrastColor = if (contrastVal > 0f) Color.Black.copy(alpha = contrastVal * 0.2f) else Color.White.copy(alpha = -contrastVal * 0.2f)
-            val highlightColor = Color.White.copy(alpha = maxOf(0f, highlightVal * 0.25f))
-            val shadowColor = Color.Black.copy(alpha = maxOf(0f, -shadowVal * 0.25f))
-            val saturationAlpha = if (saturationVal < 0f) -saturationVal * 0.5f else 0f
-            val warmthColor = Color(0xFFFFB703).copy(alpha = maxOf(0f, warmthVal * 0.25f))
-            val tintColor = Color(0xFFFB6F92).copy(alpha = maxOf(0f, tintVal * 0.25f))
 
             // Collage Canvas Box with FunPic-style Layout Grid Thumbnails and Full Editing Suite
             Box(
@@ -1098,7 +1083,6 @@ fun CollageEditorScreen(
                     .aspectRatio(aspectRatio.widthRatio / aspectRatio.heightRatio)
                     .clip(RoundedCornerShape(borderSettings.cornerRadius.dp))
                     .then(bgModifier)
-                    .alpha(fadeVal.coerceIn(0.4f, 1f))
                     .onGloballyPositioned { coordinates ->
                         canvasSizePx = coordinates.size
                     }
@@ -1180,6 +1164,7 @@ fun CollageEditorScreen(
                         filterIntensity = filterIntensity,
                         glitterCard = selectedGlitterCard,
                         glitterDensity = glitterDensity,
+                        adjustValues = adjustValues,
                         isDrawingMode = (selectedTab == EditorTool.DRAW),
                         slots = currentSlots,
                         selectedSlotIndex = selectedSlotIndex,
@@ -1191,28 +1176,6 @@ fun CollageEditorScreen(
                         },
                         modifier = Modifier.fillMaxSize()
                     )
-                }
-
-                if (brightnessColor.alpha > 0.01f) {
-                    Box(modifier = Modifier.fillMaxSize().background(brightnessColor))
-                }
-                if (contrastColor.alpha > 0.01f) {
-                    Box(modifier = Modifier.fillMaxSize().background(contrastColor))
-                }
-                if (highlightColor.alpha > 0.01f) {
-                    Box(modifier = Modifier.fillMaxSize().background(highlightColor))
-                }
-                if (shadowColor.alpha > 0.01f) {
-                    Box(modifier = Modifier.fillMaxSize().background(shadowColor))
-                }
-                if (saturationAlpha > 0.01f) {
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Gray.copy(alpha = saturationAlpha)))
-                }
-                if (warmthColor.alpha > 0.01f) {
-                    Box(modifier = Modifier.fillMaxSize().background(warmthColor))
-                }
-                if (tintColor.alpha > 0.01f) {
-                    Box(modifier = Modifier.fillMaxSize().background(tintColor))
                 }
 
                 // Render Drawing Canvas Overlay

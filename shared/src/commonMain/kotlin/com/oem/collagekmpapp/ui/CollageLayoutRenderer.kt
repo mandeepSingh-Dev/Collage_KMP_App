@@ -13,9 +13,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.draw.drawBehind
+import kotlin.math.hypot
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -24,6 +30,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.PhotoColorEngine
 import com.oem.collagekmpapp.model.CollageLayout
 import com.oem.collagekmpapp.model.Slot
 
@@ -37,6 +44,7 @@ fun RenderCollageLayout(
     filterIntensity: Float,
     glitterCard: String,
     glitterDensity: Float,
+    adjustValues: Map<String, Float> = emptyMap(),
     isDrawingMode: Boolean = false,
     slots: List<Slot>? = null,
     selectedSlotIndex: Int? = null,
@@ -99,6 +107,7 @@ fun RenderCollageLayout(
                         filterIntensity = filterIntensity,
                         glitterCard = glitterCard,
                         glitterDensity = glitterDensity,
+                        adjustValues = adjustValues,
                         isDrawingMode = isDrawingMode,
                         initialScale = currentTransform?.scale ?: 1f,
                         initialOffset = if (currentTransform != null) Offset(currentTransform.panX * slotWidthDp.value, currentTransform.panY * slotHeightDp.value) else Offset.Zero,
@@ -129,6 +138,7 @@ fun CollageImageSlot(
     filterIntensity: Float,
     glitterCard: String,
     glitterDensity: Float,
+    adjustValues: Map<String, Float> = emptyMap(),
     isDrawingMode: Boolean = false,
     initialScale: Float = 1f,
     initialOffset: Offset = Offset.Zero,
@@ -137,6 +147,16 @@ fun CollageImageSlot(
 ) {
     var scale by remember(initialScale) { mutableStateOf(initialScale) }
     var offset by remember(initialOffset) { mutableStateOf(initialOffset) }
+
+    // Real per-pixel colour grading: filter preset + Adjust tab merged into ONE color matrix.
+    // The same matrix is used by the exporter, so preview == saved image.
+    val photoColorFilter = remember(filterPreset, filterIntensity, adjustValues) {
+        PhotoColorEngine.buildMatrix(filterPreset, filterIntensity, adjustValues)
+            ?.let { ColorFilter.colorMatrix(ColorMatrix(it)) }
+    }
+    val vignette = remember(filterPreset, filterIntensity) {
+        PhotoColorEngine.vignetteStrength(filterPreset, filterIntensity)
+    }
 
     val boxModifier = modifier
         .clip(RoundedCornerShape(cornerRadius))
@@ -159,6 +179,7 @@ fun CollageImageSlot(
             model = uri,
             contentDescription = null,
             contentScale = ContentScale.Crop,
+            colorFilter = photoColorFilter,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
@@ -169,46 +190,21 @@ fun CollageImageSlot(
                 )
         )
 
-        // Filter tint
-        val alpha = (filterIntensity / 100f) * 0.45f
-        val tint = when (filterPreset) {
-            "Clarendon" -> Color(0xFF38BDF8)
-            "Gingham" -> Color(0xFFF1F5F9)
-            "Moon" -> Color(0xFF94A3B8)
-            "Lark" -> Color(0xFFFDE047)
-            "Reyes" -> Color(0xFFFED7AA)
-            "Juno" -> Color(0xFF60A5FA)
-            "Slumber" -> Color(0xFFCBD5E1)
-            "Crema" -> Color(0xFFFEF08A)
-            "Ludwig" -> Color(0xFFFCA5A5)
-            "Aden" -> Color(0xFFF472B6)
-            "Perpetua" -> Color(0xFF34D399)
-            "Amaro" -> Color(0xFFFCD34D)
-            "Mayfair" -> Color(0xFFFBCFE8)
-            "Rise" -> Color(0xFFFDE68A)
-            "Hudson" -> Color(0xFF93C5FD)
-            "Valencia" -> Color(0xFFFDBA74)
-            "X-Pro II" -> Color(0xFF818CF8)
-            "Sierra" -> Color(0xFFD8B4FE)
-            "Willow" -> Color(0xFFE2E8F0)
-            "Lo-fi" -> Color(0xFFF43F5E)
-            "Vivid" -> Color(0xFFE11D48)
-            "Golden" -> Color(0xFFF59E0B)
-            "Retro" -> Color(0xFF9A3412)
-            "Soft" -> Color(0xFFFBCFE8)
-            "Moody" -> Color(0xFF1E3A8A)
-            "Warm" -> Color(0xFFFB923C)
-            "Vintage" -> Color(0xFF78350F)
-            "B&W" -> Color.Gray
-            "Neon" -> Color(0xFF10B981)
-            else -> Color.Transparent
-        }
-
-        if (filterPreset != "Original" && filterPreset != "Natural") {
+        if (vignette > 0.01f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(tint.copy(alpha = alpha))
+                    .drawBehind {
+                        val radius = hypot(size.width, size.height) / 2f
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                0.5f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = vignette),
+                                center = center,
+                                radius = radius
+                            )
+                        )
+                    }
             )
         }
 

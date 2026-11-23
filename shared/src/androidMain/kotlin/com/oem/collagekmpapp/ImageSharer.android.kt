@@ -89,6 +89,8 @@ actual class ImageSharer(private val context: android.content.Context) {
             val content = RectF(outer, outer, bitmapWidth - outer, bitmapHeight - outer)
             val pad = spacingDp * unitScale / 2f
             val radius = cornerRadiusDp * unitScale
+            val photoPaint = PhotoLook.photoPaint(filterPreset, filterIntensity, adjustValues)
+            val vignette = PhotoColorEngine.vignetteStrength(filterPreset, filterIntensity)
             activeSlots.forEachIndexed { index, slot ->
                 val uri = safePhotos.getOrElse(index) { safePhotos.first() }
                 val rect = RectF(
@@ -107,50 +109,12 @@ actual class ImageSharer(private val context: android.content.Context) {
                     val w = photo.width * scale
                     val h = photo.height * scale
                     val destination = RectF(rect.centerX() - w / 2f, rect.centerY() - h / 2f, rect.centerX() + w / 2f, rect.centerY() + h / 2f)
-                    canvas.drawBitmap(photo, null, destination, Paint(Paint.ANTI_ALIAS_FLAG))
+                    canvas.drawBitmap(photo, null, destination, photoPaint)
                 } else {
                     canvas.drawColor(Color.LTGRAY)
                 }
-                val filterColor = getFilterColorInt(filterPreset)
-                if (filterColor != Color.TRANSPARENT && filterIntensity > 0f) {
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = filterColor
-                        alpha = ((filterIntensity / 100f) * 0.45f * 255).toInt().coerceIn(0, 255)
-                    }
-                    canvas.drawRect(rect, paint)
-                }
+                PhotoLook.drawVignette(canvas, rect, vignette)
                 canvas.restore()
-            }
-
-            // Match the editor's color adjustment overlays over the completed collage.
-            val adjustments = listOf(
-                "Brightness" to 0.35f, "Contrast" to 0.20f, "Highlight" to 0.25f,
-                "Shadow" to 0.25f, "Saturation" to 0.5f, "Warmth" to 0.25f, "Tint" to 0.25f, "Fade" to 0.3f
-            )
-            adjustments.forEach { (name, strength) ->
-                val value = (adjustValues[name] ?: 0f) / 50f
-                val color = when (name) {
-                    "Brightness" -> if (value >= 0f) Color.WHITE else Color.BLACK
-                    "Contrast" -> if (value >= 0f) Color.BLACK else Color.WHITE
-                    "Highlight" -> Color.WHITE
-                    "Shadow" -> Color.BLACK
-                    "Saturation" -> Color.GRAY
-                    "Warmth" -> Color.rgb(255, 183, 3)
-                    "Fade" -> Color.WHITE
-                    else -> Color.rgb(251, 111, 146)
-                }
-                val amount = when (name) {
-                    "Highlight" -> maxOf(0f, value)
-                    "Shadow" -> maxOf(0f, -value)
-                    "Saturation" -> maxOf(0f, -value)
-                    "Warmth", "Tint" -> maxOf(0f, value)
-                    "Fade" -> ((value + 1f) / 2f)
-                    else -> kotlin.math.abs(value)
-                }
-                if (amount > 0f) {
-                    val paint = Paint().apply { this.color = color; alpha = (amount * strength * 255).toInt().coerceIn(0, 255) }
-                    canvas.drawRect(0f, 0f, bitmapWidth.toFloat(), bitmapHeight.toFloat(), paint)
-                }
             }
 
             val coordinateScale = unitScale
@@ -316,41 +280,6 @@ actual class ImageSharer(private val context: android.content.Context) {
             }
             context.startActivity(chooser)
         }
-    }
-}
-
-private fun getFilterColorInt(preset: String): Int {
-    return when (preset) {
-        "Clarendon" -> Color.parseColor("#38BDF8")
-        "Gingham" -> Color.parseColor("#F1F5F9")
-        "Moon" -> Color.parseColor("#94A3B8")
-        "Lark" -> Color.parseColor("#FDE047")
-        "Reyes" -> Color.parseColor("#FED7AA")
-        "Juno" -> Color.parseColor("#60A5FA")
-        "Slumber" -> Color.parseColor("#CBD5E1")
-        "Crema" -> Color.parseColor("#FEF08A")
-        "Ludwig" -> Color.parseColor("#FCA5A5")
-        "Aden" -> Color.parseColor("#F472B6")
-        "Perpetua" -> Color.parseColor("#34D399")
-        "Amaro" -> Color.parseColor("#FCD34D")
-        "Mayfair" -> Color.parseColor("#FBCFE8")
-        "Rise" -> Color.parseColor("#FDE68A")
-        "Hudson" -> Color.parseColor("#93C5FD")
-        "Valencia" -> Color.parseColor("#FDBA74")
-        "X-Pro II" -> Color.parseColor("#818CF8")
-        "Sierra" -> Color.parseColor("#D8B4FE")
-        "Willow" -> Color.parseColor("#E2E8F0")
-        "Lo-fi" -> Color.parseColor("#F43F5E")
-        "Vivid" -> Color.parseColor("#E11D48")
-        "Golden" -> Color.parseColor("#F59E0B")
-        "Retro" -> Color.parseColor("#9A3412")
-        "Soft" -> Color.parseColor("#FBCFE8")
-        "Moody" -> Color.parseColor("#1E3A8A")
-        "Warm" -> Color.parseColor("#FB923C")
-        "Vintage" -> Color.parseColor("#78350F")
-        "B&W" -> Color.GRAY
-        "Neon" -> Color.parseColor("#10B981")
-        else -> Color.TRANSPARENT
     }
 }
 

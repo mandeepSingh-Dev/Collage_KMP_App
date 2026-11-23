@@ -10,6 +10,8 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import com.oem.collagekmpapp.PhotoColorEngine
+import com.oem.collagekmpapp.PhotoLook
 import com.oem.collagekmpapp.model.CollageProject
 import com.oem.collagekmpapp.model.ProjectOverlayItem
 import kotlin.math.abs
@@ -39,9 +41,6 @@ object CollageRenderer {
 
         // 2. PHOTO GRID CELLS & PER-PHOTO CLIPPING / TRANSFORMS / FILTERS
         drawPhotoGrid(canvas, project, w, h, photoBitmaps)
-
-        // 3. GLOBAL ADJUSTMENTS OVERLAY (Brightness, Contrast, Highlight, Shadow, Saturation, Warmth, Tint)
-        drawGlobalAdjustments(canvas, project, w, h)
 
         // 4. FREEHAND DRAW STROKES
         drawStrokes(canvas, project, w, h)
@@ -101,6 +100,9 @@ object CollageRenderer {
         val content = RectF(outerSpacing, outerSpacing, w - outerSpacing, h - outerSpacing)
         val pad = innerSpacing / 2f
 
+        val photoPaint = PhotoLook.photoPaint(project.filterPreset, project.filterIntensity, project.adjustValues)
+        val vignette = PhotoColorEngine.vignetteStrength(project.filterPreset, project.filterIntensity)
+
         project.slots.forEachIndexed { index, slot ->
             val photoTransform = project.photos.getOrNull(index)
             val uri = photoTransform?.uri ?: project.photos.firstOrNull()?.uri ?: ""
@@ -140,70 +142,16 @@ object CollageRenderer {
                     canvas.rotate(photoTransform.rotation, rect.centerX(), rect.centerY())
                 }
                 val dest = RectF(cx - pw / 2f, cy - ph / 2f, cx + pw / 2f, cy + ph / 2f)
-                canvas.drawBitmap(photoBitmap, null, dest, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                canvas.drawBitmap(photoBitmap, null, dest, photoPaint)
                 canvas.restore()
             } else {
                 val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.LTGRAY }
                 canvas.drawRect(rect, placeholderPaint)
             }
 
-            // Per-photo Filter Tint
-            val filterColor = getFilterColorInt(project.filterPreset)
-            if (filterColor != Color.TRANSPARENT && project.filterIntensity > 0f) {
-                val filterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = filterColor
-                    alpha = ((project.filterIntensity / 100f) * 0.45f * 255).toInt().coerceIn(0, 255)
-                }
-                canvas.drawRect(rect, filterPaint)
-            }
+            PhotoLook.drawVignette(canvas, rect, vignette)
 
             canvas.restore()
-        }
-    }
-
-    private fun drawGlobalAdjustments(
-        canvas: Canvas,
-        project: CollageProject,
-        w: Float,
-        h: Float
-    ) {
-        val brightnessVal = (project.adjustValues["Brightness"] ?: 0f) / 50f
-        val contrastVal = (project.adjustValues["Contrast"] ?: 0f) / 50f
-        val highlightVal = (project.adjustValues["Highlight"] ?: 0f) / 50f
-        val shadowVal = (project.adjustValues["Shadow"] ?: 0f) / 50f
-        val saturationVal = (project.adjustValues["Saturation"] ?: 0f) / 50f
-        val warmthVal = (project.adjustValues["Warmth"] ?: 0f) / 50f
-        val tintVal = (project.adjustValues["Tint"] ?: 0f) / 50f
-
-        if (abs(brightnessVal) > 0.01f) {
-            val color = if (brightnessVal > 0f) Color.WHITE else Color.BLACK
-            val alpha = (abs(brightnessVal) * 0.35f * 255).toInt().coerceIn(0, 255)
-            canvas.drawRect(0f, 0f, w, h, Paint().apply { this.color = color; this.alpha = alpha })
-        }
-        if (abs(contrastVal) > 0.01f) {
-            val color = if (contrastVal > 0f) Color.BLACK else Color.WHITE
-            val alpha = (abs(contrastVal) * 0.20f * 255).toInt().coerceIn(0, 255)
-            canvas.drawRect(0f, 0f, w, h, Paint().apply { this.color = color; this.alpha = alpha })
-        }
-        if (highlightVal > 0.01f) {
-            val alpha = (highlightVal * 0.25f * 255).toInt().coerceIn(0, 255)
-            canvas.drawRect(0f, 0f, w, h, Paint().apply { color = Color.WHITE; this.alpha = alpha })
-        }
-        if (shadowVal < -0.01f) {
-            val alpha = (-shadowVal * 0.25f * 255).toInt().coerceIn(0, 255)
-            canvas.drawRect(0f, 0f, w, h, Paint().apply { color = Color.BLACK; this.alpha = alpha })
-        }
-        if (saturationVal < -0.01f) {
-            val alpha = (-saturationVal * 0.5f * 255).toInt().coerceIn(0, 255)
-            canvas.drawRect(0f, 0f, w, h, Paint().apply { color = Color.GRAY; this.alpha = alpha })
-        }
-        if (warmthVal > 0.01f) {
-            val alpha = (warmthVal * 0.25f * 255).toInt().coerceIn(0, 255)
-            canvas.drawRect(0f, 0f, w, h, Paint().apply { color = Color.rgb(255, 183, 3); this.alpha = alpha })
-        }
-        if (tintVal > 0.01f) {
-            val alpha = (tintVal * 0.25f * 255).toInt().coerceIn(0, 255)
-            canvas.drawRect(0f, 0f, w, h, Paint().apply { color = Color.rgb(251, 111, 146); this.alpha = alpha })
         }
     }
 
@@ -361,41 +309,6 @@ object CollageRenderer {
             canvas.drawText(textLayer.text, 0f, yPos, paint)
 
             canvas.restore()
-        }
-    }
-
-    private fun getFilterColorInt(preset: String): Int {
-        return when (preset) {
-            "Clarendon" -> Color.parseColor("#38BDF8")
-            "Gingham" -> Color.parseColor("#F1F5F9")
-            "Moon" -> Color.parseColor("#94A3B8")
-            "Lark" -> Color.parseColor("#FDE047")
-            "Reyes" -> Color.parseColor("#FED7AA")
-            "Juno" -> Color.parseColor("#60A5FA")
-            "Slumber" -> Color.parseColor("#CBD5E1")
-            "Crema" -> Color.parseColor("#FEF08A")
-            "Ludwig" -> Color.parseColor("#FCA5A5")
-            "Aden" -> Color.parseColor("#F472B6")
-            "Perpetua" -> Color.parseColor("#34D399")
-            "Amaro" -> Color.parseColor("#FCD34D")
-            "Mayfair" -> Color.parseColor("#FBCFE8")
-            "Rise" -> Color.parseColor("#FDE68A")
-            "Hudson" -> Color.parseColor("#93C5FD")
-            "Valencia" -> Color.parseColor("#FDBA74")
-            "X-Pro II" -> Color.parseColor("#818CF8")
-            "Sierra" -> Color.parseColor("#D8B4FE")
-            "Willow" -> Color.parseColor("#E2E8F0")
-            "Lo-fi" -> Color.parseColor("#F43F5E")
-            "Vivid" -> Color.parseColor("#E11D48")
-            "Golden" -> Color.parseColor("#F59E0B")
-            "Retro" -> Color.parseColor("#9A3412")
-            "Soft" -> Color.parseColor("#FBCFE8")
-            "Moody" -> Color.parseColor("#1E3A8A")
-            "Warm" -> Color.parseColor("#FB923C")
-            "Vintage" -> Color.parseColor("#78350F")
-            "B&W" -> Color.GRAY
-            "Neon" -> Color.parseColor("#10B981")
-            else -> Color.TRANSPARENT
         }
     }
 }
