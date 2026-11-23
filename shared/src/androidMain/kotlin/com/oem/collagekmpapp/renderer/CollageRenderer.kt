@@ -102,6 +102,7 @@ object CollageRenderer {
 
         val photoPaint = PhotoLook.photoPaint(project.filterPreset, project.filterIntensity, project.adjustValues)
         val vignette = PhotoColorEngine.vignetteStrength(project.filterPreset, project.filterIntensity)
+        val glow = PhotoColorEngine.glowStrength(project.filterPreset, project.filterIntensity)
 
         project.slots.forEachIndexed { index, slot ->
             val photoTransform = project.photos.getOrNull(index)
@@ -143,6 +144,7 @@ object CollageRenderer {
                 }
                 val dest = RectF(cx - pw / 2f, cy - ph / 2f, cx + pw / 2f, cy + ph / 2f)
                 canvas.drawBitmap(photoBitmap, null, dest, photoPaint)
+                PhotoLook.drawGlow(canvas, photoBitmap, dest, photoPaint.colorFilter, glow)
                 canvas.restore()
             } else {
                 val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.LTGRAY }

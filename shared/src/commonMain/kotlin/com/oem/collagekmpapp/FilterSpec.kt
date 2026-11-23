@@ -22,7 +22,8 @@ data class FilterSpec(
     val rShift: Float = 0f,       // per-channel additive shift, fraction of full range
     val gShift: Float = 0f,
     val bShift: Float = 0f,
-    val vignette: Float = 0f      // 0..1 edge darkening
+    val vignette: Float = 0f,     // 0..1 edge darkening
+    val glow: Float = 0f          // 0..1 soft bloom (the 'glowing skin' look)
 )
 
 object PhotoFilters {
@@ -34,17 +35,17 @@ object PhotoFilters {
         "Clarendon" to FilterSpec(brightness = .05f, contrast = .18f, saturation = .25f, bGain = 1.06f, rGain = .98f),
         "Gingham" to FilterSpec(brightness = .05f, contrast = -.1f, saturation = -.15f, warmth = .05f, fade = .3f),
         "Moon" to FilterSpec(brightness = .05f, contrast = .15f, saturation = -1f, bGain = 1.03f),
-        "Lark" to FilterSpec(brightness = .10f, contrast = .05f, saturation = -.1f, warmth = -.03f, gGain = 1.03f),
+        "Lark" to FilterSpec(brightness = .10f, contrast = .05f, saturation = -.1f, warmth = -.03f, gGain = 1.03f, glow = 0.25f),
         "Reyes" to FilterSpec(brightness = .08f, contrast = -.08f, saturation = -.2f, warmth = .12f, fade = .35f),
         "Juno" to FilterSpec(contrast = .12f, saturation = .3f, warmth = .08f, tint = -.04f, rGain = 1.04f),
         "Slumber" to FilterSpec(brightness = -.03f, saturation = -.3f, warmth = .08f, fade = .3f),
         "Crema" to FilterSpec(brightness = .04f, saturation = -.15f, warmth = .10f, fade = .2f),
         "Ludwig" to FilterSpec(brightness = .03f, contrast = .08f, saturation = .1f, warmth = .04f),
-        "Aden" to FilterSpec(brightness = .08f, saturation = -.2f, rGain = 1.03f, bGain = 1.02f, fade = .25f, tint = .05f),
+        "Aden" to FilterSpec(brightness = .08f, saturation = -.2f, rGain = 1.03f, bGain = 1.02f, fade = .25f, tint = .05f, glow = 0.3f),
         "Perpetua" to FilterSpec(contrast = .06f, saturation = .1f, tint = -.06f, gGain = 1.04f, bGain = 1.02f),
-        "Amaro" to FilterSpec(brightness = .10f, contrast = .10f, saturation = .2f, warmth = .08f, vignette = .15f),
+        "Amaro" to FilterSpec(brightness = .10f, contrast = .10f, saturation = .2f, warmth = .08f, vignette = .15f, glow = 0.25f),
         "Mayfair" to FilterSpec(brightness = .04f, contrast = .10f, saturation = .1f, warmth = .06f, tint = .05f, vignette = .2f),
-        "Rise" to FilterSpec(brightness = .10f, contrast = -.05f, saturation = -.05f, warmth = .10f, fade = .25f),
+        "Rise" to FilterSpec(brightness = .10f, contrast = -.05f, saturation = -.05f, warmth = .10f, fade = .25f, glow = 0.3f),
         "Hudson" to FilterSpec(brightness = -.02f, contrast = .12f, saturation = .05f, warmth = -.12f, bGain = 1.08f, vignette = .15f),
         "Valencia" to FilterSpec(brightness = .05f, contrast = .05f, saturation = .1f, warmth = .12f, fade = .25f),
         "X-Pro II" to FilterSpec(contrast = .30f, saturation = .25f, warmth = .05f, bGain = .96f, vignette = .45f),
@@ -52,9 +53,9 @@ object PhotoFilters {
         "Willow" to FilterSpec(brightness = .04f, contrast = .05f, saturation = -.85f, warmth = .02f, fade = .25f),
         "Lo-fi" to FilterSpec(brightness = -.03f, contrast = .30f, saturation = .35f, vignette = .35f),
         "Vivid" to FilterSpec(brightness = .02f, contrast = .15f, saturation = .55f),
-        "Golden" to FilterSpec(brightness = .06f, contrast = .05f, saturation = .15f, warmth = .30f, rGain = 1.02f, bGain = .92f),
+        "Golden" to FilterSpec(brightness = .06f, contrast = .05f, saturation = .15f, warmth = .30f, rGain = 1.02f, bGain = .92f, glow = 0.4f),
         "Retro" to FilterSpec(contrast = .10f, saturation = -.2f, warmth = .15f, fade = .5f, vignette = .3f),
-        "Soft" to FilterSpec(brightness = .08f, contrast = -.15f, saturation = -.08f, fade = .25f),
+        "Soft" to FilterSpec(brightness = .08f, contrast = -.15f, saturation = -.08f, fade = .25f, glow = 0.5f),
         "Moody" to FilterSpec(brightness = -.12f, contrast = .20f, saturation = -.15f, warmth = -.10f, vignette = .35f),
         "Warm" to FilterSpec(brightness = .03f, warmth = .25f),
         "Vintage" to FilterSpec(contrast = .08f, saturation = -.3f, warmth = .20f, fade = .55f, bGain = .92f, vignette = .3f),
@@ -73,36 +74,61 @@ object PhotoFilters {
         "Polaroid" to FilterSpec(brightness = .05f, contrast = -.05f, saturation = -.05f, warmth = .08f, rShift = .02f, fade = .4f, vignette = .25f),
         "Faded" to FilterSpec(contrast = -.10f, saturation = -.25f, fade = .75f),
         "Matte" to FilterSpec(brightness = .02f, contrast = -.10f, saturation = -.1f, fade = .6f),
-        "Dreamy" to FilterSpec(brightness = .12f, contrast = -.2f, saturation = -.1f, warmth = .05f, tint = .04f, fade = .25f),
+        "Dreamy" to FilterSpec(brightness = .12f, contrast = -.2f, saturation = -.1f, warmth = .05f, tint = .04f, fade = .25f, glow = 0.8f),
         "Cool" to FilterSpec(warmth = -.25f, bGain = 1.03f),
         "Sunset" to FilterSpec(contrast = .10f, saturation = .2f, warmth = .35f, tint = .10f, rGain = 1.05f),
-        "Fresh" to FilterSpec(brightness = .10f, contrast = .05f, saturation = .2f, warmth = -.04f, tint = -.03f),
-        "Pastel" to FilterSpec(brightness = .12f, contrast = -.10f, saturation = -.25f, tint = .04f, fade = .5f),
+        "Fresh" to FilterSpec(brightness = .10f, contrast = .05f, saturation = .2f, warmth = -.04f, tint = -.03f, glow = 0.3f),
+        "Pastel" to FilterSpec(brightness = .12f, contrast = -.10f, saturation = -.25f, tint = .04f, fade = .5f, glow = 0.3f),
         "Cyber" to FilterSpec(contrast = .25f, saturation = .4f, rGain = 1.05f, gGain = .9f, bGain = 1.15f, vignette = .25f),
-        "Sunkissed" to FilterSpec(brightness = .08f, saturation = .1f, warmth = .22f, fade = .15f),
+        "Sunkissed" to FilterSpec(brightness = .08f, saturation = .1f, warmth = .22f, fade = .15f, glow = 0.4f),
         "HDR" to FilterSpec(contrast = .35f, saturation = .3f),
-        "Portrait" to FilterSpec(brightness = .08f, contrast = -.03f, saturation = -.05f, warmth = .06f, fade = .08f),
+        "Portrait" to FilterSpec(brightness = .08f, contrast = -.03f, saturation = -.05f, warmth = .06f, fade = .08f, glow = 0.6f),
         "Summer" to FilterSpec(brightness = .07f, contrast = .10f, saturation = .3f, warmth = .12f),
         "Autumn" to FilterSpec(contrast = .10f, saturation = .15f, warmth = .25f, tint = .04f, gGain = .97f, bGain = .9f),
         "Winter" to FilterSpec(brightness = .06f, contrast = .08f, saturation = -.1f, warmth = -.22f, bGain = 1.04f),
         "Dramatic" to FilterSpec(brightness = -.08f, contrast = .40f, saturation = -.2f, vignette = .4f),
         "Chrome" to FilterSpec(brightness = .02f, contrast = .25f, saturation = -.25f, bGain = 1.03f),
         "Tokyo" to FilterSpec(brightness = -.03f, contrast = .15f, saturation = .3f, tint = .08f, rGain = 1.04f, bGain = 1.10f),
-        "Rosy" to FilterSpec(brightness = .06f, saturation = .05f, warmth = .08f, tint = .10f, fade = .2f),
+        "Rosy" to FilterSpec(brightness = .06f, saturation = .05f, warmth = .08f, tint = .10f, fade = .2f, glow = 0.4f),
         "Emerald" to FilterSpec(contrast = .10f, saturation = .15f, tint = -.12f, gGain = 1.05f),
         "Lomo" to FilterSpec(contrast = .35f, saturation = .4f, warmth = .05f, vignette = .55f),
         "Bleach" to FilterSpec(brightness = .05f, contrast = .30f, saturation = -.5f),
-        "Haze" to FilterSpec(brightness = .10f, contrast = -.2f, saturation = -.1f, bGain = 1.02f, fade = .55f),
+        "Haze" to FilterSpec(brightness = .10f, contrast = -.2f, saturation = -.1f, bGain = 1.02f, fade = .55f, glow = 0.7f),
+        // ---- GLOW filters: soft bloom + lifted skin tones ----
+        "Glow" to FilterSpec(brightness = .08f, contrast = -.04f, saturation = .12f, warmth = .06f, fade = .08f, glow = .9f),
+        "Beauty" to FilterSpec(brightness = .10f, contrast = -.05f, saturation = .05f, warmth = .05f, tint = .03f, fade = .12f, glow = .7f),
+        "Radiant" to FilterSpec(brightness = .08f, contrast = .05f, saturation = .15f, warmth = .10f, glow = .8f),
+        "Porcelain" to FilterSpec(brightness = .12f, contrast = -.05f, saturation = -.1f, warmth = -.04f, fade = .12f, glow = .6f),
+        "Golden Hour" to FilterSpec(brightness = .06f, contrast = .08f, saturation = .2f, warmth = .35f, fade = .1f, vignette = .2f, glow = .6f),
+        "Angel" to FilterSpec(brightness = .15f, contrast = -.15f, saturation = -.05f, fade = .2f, glow = 1f),
     )
 
     /** Use this to build the filter strip in your UI so UI + engine never drift apart. */
     val names: List<String> get() = specs.keys.toList()
+
+    /** Instagram-style category tabs. "Original" is always first. */
+    val categories: Map<String, List<String>> by lazy {
+        fun cat(vararg n: String) = listOf("Original") + n.filter { specs.containsKey(it) }
+        linkedMapOf(
+            "All" to names,
+            "Popular" to cat("Clarendon", "Juno", "Lark", "Valencia", "Aden", "Amaro", "Mayfair", "Glow", "Portrait", "Teal & Orange", "Vivid", "HDR"),
+            "Glow" to cat("Glow", "Beauty", "Radiant", "Porcelain", "Angel", "Golden Hour", "Portrait", "Dreamy", "Soft", "Rosy", "Sunkissed", "Haze"),
+            "B&W" to cat("Moon", "B&W", "Noir", "Silver", "Willow", "Bleach", "Chrome", "Dramatic"),
+            "Warm" to cat("Warm", "Golden", "Sunset", "Sunkissed", "Autumn", "Kodak", "Summer", "Crema", "Rise", "Reyes", "Valencia", "Golden Hour"),
+            "Cool" to cat("Cool", "Winter", "Hudson", "Moody", "Cyber", "Tokyo", "Fuji", "Juno", "Emerald", "Perpetua"),
+            "Vintage" to cat("Vintage", "Retro", "Film", "Polaroid", "Sepia", "Faded", "Matte", "Sierra", "Gingham", "Lo-fi", "Lomo", "Slumber"),
+            "Cinematic" to cat("Cinematic", "Teal & Orange", "Moody", "Dramatic", "Noir", "X-Pro II", "Tokyo", "Cyber")
+        )
+    }
 }
 
 object PhotoColorEngine {
 
     /** Adjust sliders are assumed to span -50..50 (same as your current `/ 50f`). Change if yours is ±100. */
     private const val ADJUST_RANGE = 50f
+
+    /** Global multiplier on every filter preset. Raise for punchier Instagram-like looks, lower for subtle. */
+    private const val LOOK_STRENGTH = 1.4f
 
     private val IDENTITY = floatArrayOf(
         1f, 0f, 0f, 0f, 0f,
@@ -127,22 +153,32 @@ object PhotoColorEngine {
         return ((PhotoFilters.specs[preset]?.vignette ?: 0f) * t).coerceIn(0f, 0.7f)
     }
 
+    /** 0..1 strength of the soft-bloom glow layer for this filter. */
+    fun glowStrength(preset: String, intensity: Float): Float {
+        val t = (intensity / 100f).coerceIn(0f, 1f)
+        return ((PhotoFilters.specs[preset]?.glow ?: 0f) * t).coerceIn(0f, 1f)
+    }
+
     // ---------------------------------------------------------------- filter preset
 
     private fun specToMatrix(s: FilterSpec): FloatArray {
+        val k = LOOK_STRENGTH
+        fun amp(gain: Float) = 1f + (gain - 1f) * k
+        val warmth = s.warmth * k
+        val tint = s.tint * k
         var m = IDENTITY
-        m = concat(saturationM(1f + s.saturation), m)
+        m = concat(saturationM(1f + (s.saturation * k).coerceAtLeast(-1f)), m)
         m = concat(
             diag(
-                (1f + .18f * s.warmth) * (1f + .04f * s.tint) * s.rGain,
-                (1f + .03f * s.warmth) * (1f - .12f * s.tint) * s.gGain,
-                (1f - .18f * s.warmth) * (1f + .04f * s.tint) * s.bGain,
-                s.rShift * 255f, s.gShift * 255f, s.bShift * 255f
+                (1f + .18f * warmth) * (1f + .04f * tint) * amp(s.rGain),
+                (1f + .03f * warmth) * (1f - .12f * tint) * amp(s.gGain),
+                (1f - .18f * warmth) * (1f + .04f * tint) * amp(s.bGain),
+                s.rShift * k * 255f, s.gShift * k * 255f, s.bShift * k * 255f
             ), m
         )
-        m = concat(contrastM(s.contrast), m)
-        m = concat(brightnessM(s.brightness), m)
-        m = concat(fadeM(s.fade * 0.4f), m)
+        m = concat(contrastM((s.contrast * k).coerceIn(-1f, 1f)), m)
+        m = concat(brightnessM(s.brightness * k), m)
+        m = concat(fadeM((s.fade * 0.4f * k).coerceAtMost(0.3f)), m)
         return m
     }
 

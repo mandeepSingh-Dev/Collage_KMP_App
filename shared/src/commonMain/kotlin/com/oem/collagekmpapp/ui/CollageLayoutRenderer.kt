@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.FilteredPhoto
 import com.oem.collagekmpapp.PhotoColorEngine
 import com.oem.collagekmpapp.model.CollageLayout
 import com.oem.collagekmpapp.model.Slot
@@ -157,6 +158,9 @@ fun CollageImageSlot(
     val vignette = remember(filterPreset, filterIntensity) {
         PhotoColorEngine.vignetteStrength(filterPreset, filterIntensity)
     }
+    val glow = remember(filterPreset, filterIntensity) {
+        PhotoColorEngine.glowStrength(filterPreset, filterIntensity)
+    }
 
     val boxModifier = modifier
         .clip(RoundedCornerShape(cornerRadius))
@@ -175,38 +179,19 @@ fun CollageImageSlot(
     }
 
     Box(modifier = finalModifier) {
-        AsyncImage(
-            model = uri,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
+        FilteredPhoto(
+            uri = uri,
             colorFilter = photoColorFilter,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offset.x,
-                    translationY = offset.y
-                )
-        )
-
-        if (vignette > 0.01f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .drawBehind {
-                        val radius = hypot(size.width, size.height) / 2f
-                        drawRect(
-                            brush = Brush.radialGradient(
-                                0.5f to Color.Transparent,
-                                1f to Color.Black.copy(alpha = vignette),
-                                center = center,
-                                radius = radius
-                            )
-                        )
-                    }
+            vignette = vignette,
+            glow = glow,
+            modifier = Modifier.fillMaxSize(),
+            imageModifier = Modifier.graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                translationX = offset.x,
+                translationY = offset.y
             )
-        }
+        )
 
         // Distinct Glitter Overlays
         if (glitterDensity > 0f) {

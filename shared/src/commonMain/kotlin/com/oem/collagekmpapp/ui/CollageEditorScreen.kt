@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import com.oem.collagekmpapp.model.FilterRepository
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,6 +52,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.FilterPickerPanel
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberGalleryPicker
 import com.oem.collagekmpapp.model.*
@@ -205,7 +205,6 @@ fun CollageEditorScreen(
         }
     }
 
-    val filterPresets = FilterRepository.presets
     val glitterCards = listOf("Glitz", "Spark 1", "Flare 2", "Dust", "Diamond Glow", "Heart Sparkle", "Golden Shimmer")
     val fontCards = listOf("Modern", "Script", "Bold", "Retro", "Serif", "Neon")
 
@@ -430,69 +429,23 @@ fun CollageEditorScreen(
                             }
                         }
                         EditorTool.FILTER -> {
-                            Column(
+                            FilterPickerPanel(
+                                // thumbnails use the selected slot's photo, else the first photo
+                                previewUri = selectedSlotIndex?.let { selectedPhotos.getOrNull(it) }
+                                    ?: selectedPhotos.firstOrNull(),
+                                selectedPreset = selectedPreset,
+                                intensity = filterIntensity,
+                                onPresetSelected = { preset ->
+                                    selectedPreset = preset
+                                    // Instagram applies a filter at full strength; slider then dials it back
+                                    filterIntensity = if (preset == "Original") 0f else 100f
+                                },
+                                onIntensityChange = { filterIntensity = it },
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .verticalScroll(rememberScrollState())
-                                    .animateContentSize()
-                                    .padding(vertical = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text("Filters", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-
-                                AnimatedVisibility(visible = selectedPreset != "Original") {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        Text("Intensity: ${filterIntensity.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        FluidSlider(
-                                            value = filterIntensity,
-                                            onValueChange = { filterIntensity = it },
-                                            valueRange = 0f..100f,
-                                            modifier = Modifier.fillMaxWidth().height(36.dp)
-                                        )
-                                    }
-                                }
-
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    items(filterPresets) { preset ->
-                                        val isSelected = selectedPreset == preset
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            modifier = Modifier.clickable {
-                                                selectedPreset = preset
-                                                filterIntensity = if (preset == "Original") 0f else 50f
-                                            }
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(46.dp)
-                                                    .clip(CircleShape)
-                                                    .background(getFilterTintColor(preset))
-                                                    .border(
-                                                        width = if (isSelected) 2.5.dp else 1.dp,
-                                                        color = if (isSelected) Color(0xFF2563EB) else Color.Transparent,
-                                                        shape = CircleShape
-                                                    ),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (preset == "Original") {
-                                                    Text("Orig", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = preset,
-                                                fontSize = 11.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                                    .padding(vertical = 4.dp)
+                            )
                         }
                         EditorTool.STICKERS -> {
                             val currentStickers = if (selectedStickerCategory == "All") {

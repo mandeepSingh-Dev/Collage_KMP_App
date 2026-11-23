@@ -1,6 +1,10 @@
 package com.oem.collagekmpapp
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.ColorFilter
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
@@ -35,5 +39,23 @@ object PhotoLook {
             )
         }
         canvas.drawRect(rect, paint)
+    }
+
+    /**
+     * Soft bloom: a heavily down-sampled (= blurred) copy of the graded photo is screen-blended
+     * over it. Bright skin spreads a gentle light -> the "glowing face" look.
+     */
+    fun drawGlow(canvas: Canvas, bitmap: Bitmap, dest: RectF, colorFilter: ColorFilter?, glow: Float) {
+        if (glow <= 0.01f || bitmap.isRecycled) return
+        val sw = (dest.width() / 16f).toInt().coerceAtLeast(4)
+        val sh = (dest.height() / 16f).toInt().coerceAtLeast(4)
+        val small = Bitmap.createScaledBitmap(bitmap, sw, sh, true)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+            alpha = (glow * 0.6f * 255f).toInt().coerceIn(0, 255)
+            this.colorFilter = colorFilter
+        }
+        canvas.drawBitmap(small, null, dest, paint)
+        if (small !== bitmap) small.recycle()
     }
 }
