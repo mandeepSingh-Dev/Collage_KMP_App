@@ -6,6 +6,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.oem.collagekmpapp.model.Screen
 import com.oem.collagekmpapp.ui.CollageEditorScreen
 import com.oem.collagekmpapp.ui.HomeScreen
+import com.oem.collagekmpapp.ui.SettingsScreen
 
 @Composable
 @Preview
@@ -16,6 +17,13 @@ fun App() {
         when (val screen = currentScreen) {
             is Screen.Home -> {
                 HomeScreen(
+                    onNavigate = { targetScreen ->
+                        currentScreen = targetScreen
+                    }
+                )
+            }
+            is Screen.Settings -> {
+                SettingsScreen(
                     onNavigate = { targetScreen ->
                         currentScreen = targetScreen
                     }

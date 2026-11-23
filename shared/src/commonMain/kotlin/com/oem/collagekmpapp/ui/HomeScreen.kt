@@ -84,7 +84,9 @@ fun HomeScreen(
                     BottomNavItem(icon = Icons.Default.GridView, label = "Creations", selected = false) {
                         galleryPicker.launch()
                     }
-                    BottomNavItem(icon = Icons.Default.Settings, label = "Settings", selected = false) {}
+                    BottomNavItem(icon = Icons.Default.Settings, label = "Settings", selected = false) {
+                        onNavigate(Screen.Settings)
+                    }
                 }
             }
         }
