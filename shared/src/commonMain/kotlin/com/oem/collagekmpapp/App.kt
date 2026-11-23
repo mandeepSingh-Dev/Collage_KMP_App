@@ -5,6 +5,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.tooling.preview.Preview
 import com.oem.collagekmpapp.model.Screen
 import com.oem.collagekmpapp.ui.CollageEditorScreen
+import com.oem.collagekmpapp.ui.SavePathScreen
+import com.oem.collagekmpapp.ui.FeedbackScreen
 import com.oem.collagekmpapp.ui.HomeScreen
 import com.oem.collagekmpapp.ui.SettingsScreen
 
@@ -13,6 +15,7 @@ import com.oem.collagekmpapp.ui.SettingsScreen
 fun App() {
     MaterialTheme {
         var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
+        var selectedSavePath by remember { mutableStateOf("/Pictures/CollageStudio") }
 
         when (val screen = currentScreen) {
             is Screen.Home -> {
@@ -24,9 +27,26 @@ fun App() {
             }
             is Screen.Settings -> {
                 SettingsScreen(
+                    selectedSavePath = selectedSavePath,
                     onNavigate = { targetScreen ->
                         currentScreen = targetScreen
                     }
+                )
+            }
+            is Screen.SavePath -> {
+                SavePathScreen(
+                    selectedPath = screen.selectedPath,
+                    onBack = { currentScreen = Screen.Settings },
+                    onSelect = { path ->
+                        selectedSavePath = path
+                        currentScreen = Screen.Settings
+                    }
+                )
+            }
+            is Screen.Feedback -> {
+                FeedbackScreen(
+                    onBack = { currentScreen = Screen.Settings },
+                    onNavigate = { targetScreen -> currentScreen = targetScreen }
                 )
             }
             is Screen.LayoutSelection -> {

@@ -24,7 +24,8 @@ import com.oem.collagekmpapp.rememberGalleryPicker
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onNavigate: (Screen) -> Unit
+    onNavigate: (Screen) -> Unit,
+    selectedSavePath: String = "/Pictures/CollageStudio"
 ) {
     val scrollState = rememberScrollState()
     var selectedResolution by remember { mutableStateOf("Standard Resolution (720p)") }
@@ -99,8 +100,8 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Default.FolderOpen,
                     title = "Save Path",
-                    subtitle = "/Pictures/CollageStudio",
-                    onClick = {}
+                    subtitle = selectedSavePath,
+                    onClick = { onNavigate(Screen.SavePath(selectedSavePath)) }
                 )
             }
 
@@ -128,7 +129,7 @@ fun SettingsScreen(
                     icon = Icons.Default.Feedback,
                     title = "Feedback",
                     subtitle = null,
-                    onClick = {}
+                    onClick = { onNavigate(Screen.Feedback) }
                 )
                 HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
                 SettingsRow(

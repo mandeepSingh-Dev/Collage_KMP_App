@@ -66,6 +66,8 @@ data class LayoutTemplate(
 sealed class Screen {
     object Home : Screen()
     object Settings : Screen()
+    data class SavePath(val selectedPath: String) : Screen()
+    object Feedback : Screen()
     data class LayoutSelection(val selectedPhotos: List<String>) : Screen()
     data class Editor(val layoutId: String, val selectedPhotos: List<String>) : Screen()
 }
