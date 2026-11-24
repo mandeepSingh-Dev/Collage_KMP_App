@@ -13,13 +13,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oem.collagekmpapp.model.Screen
-import com.oem.collagekmpapp.rememberGalleryPicker
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,16 +28,32 @@ fun SettingsScreen(
     selectedSavePath: String = "/Pictures/CollageStudio"
 ) {
     val scrollState = rememberScrollState()
-    var selectedResolution by remember { mutableStateOf("Standard Resolution (720p)") }
-    var selectedLanguage by remember { mutableStateOf("English") }
 
+    // Settings states
+    var selectedResolution by remember { mutableStateOf("Standard Resolution (720p)") }
+    var selectedLanguage by remember { mutableStateOf("English (Default)") }
+    var exportFormat by remember { mutableStateOf("JPEG") }
+    var imageQuality by remember { mutableFloatStateOf(90f) }
+    var watermarkEnabled by remember { mutableStateOf(false) }
+    var themeMode by remember { mutableStateOf(DEFAULT_THEME) }
+    var cacheSize by remember { mutableStateOf("14.2 MB") }
+    var showClearedSnackbar by remember { mutableStateOf(false) }
+
+    // Bottom sheets state
     var showResolutionSheet by remember { mutableStateOf(false) }
+    val resolutionSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showLanguageSheet by remember { mutableStateOf(false) }
+    var showFormatSheet by remember { mutableStateOf(false) }
+    var showThemeSheet by remember { mutableStateOf(false) }
     var languageQuery by remember { mutableStateOf("") }
 
-    val galleryPicker = rememberGalleryPicker { selectedUris ->
-        if (selectedUris.size > 1) {
-            onNavigate(Screen.LayoutSelection(selectedUris))
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(showClearedSnackbar) {
+        if (showClearedSnackbar) {
+            snackbarHostState.showSnackbar("Cache cleared successfully (${cacheSize})")
+            cacheSize = "0 KB"
+            showClearedSnackbar = false
         }
     }
 
@@ -50,37 +66,15 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF1E293B))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFF8FAFC))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFEDF2F7))
             )
         },
-        bottomBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp, horizontal = 32.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    BottomNavItem(icon = Icons.Default.Home, label = "Home", selected = false) {
-                        onNavigate(Screen.Home)
-                    }
-                    BottomNavItem(icon = Icons.Default.GridView, label = "Creations", selected = false) {
-                        galleryPicker.launch()
-                    }
-                    BottomNavItem(icon = Icons.Default.Settings, label = "Settings", selected = true) {}
-                }
-            }
-        }
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF8FAFC))
+                .background(Color(0xFFEDF2F7))
                 .padding(innerPadding)
                 .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 16.dp),
@@ -103,12 +97,27 @@ fun SettingsScreen(
                     subtitle = selectedSavePath,
                     onClick = { onNavigate(Screen.SavePath(selectedSavePath)) }
                 )
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                SettingsRow(
+                    icon = Icons.Default.FilePresent,
+                    title = "Export Format",
+                    subtitle = exportFormat,
+                    onClick = { showFormatSheet = true }
+                )
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                SettingsSwitchRow(
+                    icon = Icons.Default.WaterDrop,
+                    title = "Add Watermark",
+                    subtitle = "Watermark exported creations",
+                    checked = watermarkEnabled,
+                    onCheckedChange = { watermarkEnabled = it }
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Section 2: Preferences
-            SettingsSectionHeader("Preferences")
+            // Section 2: Preferences & Appearance
+            SettingsSectionHeader("Preferences & Appearance")
             Spacer(modifier = Modifier.height(8.dp))
             SettingsCard {
                 SettingsRow(
@@ -116,6 +125,20 @@ fun SettingsScreen(
                     title = "Select Language",
                     subtitle = selectedLanguage,
                     onClick = { showLanguageSheet = true }
+                )
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                SettingsRow(
+                    icon = Icons.Default.DarkMode,
+                    title = "App Theme",
+                    subtitle = themeMode,
+                    onClick = { showThemeSheet = true }
+                )
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                SettingsRow(
+                    icon = Icons.Default.CleaningServices,
+                    title = "Clear Temp Cache",
+                    subtitle = cacheSize,
+                    onClick = { showClearedSnackbar = true }
                 )
             }
 
@@ -157,8 +180,13 @@ fun SettingsScreen(
                     .clip(RoundedCornerShape(18.dp))
                     .background(Color.White)
                     .clickable {
-                        selectedResolution = "Standard Resolution (720p)"
-                        selectedLanguage = "English"
+                        selectedResolution = DEFAULT_RESOLUTION
+                        selectedLanguage = DEFAULT_LANGUAGE
+                        exportFormat = DEFAULT_FORMAT
+                        imageQuality = 90f
+                        watermarkEnabled = false
+                        themeMode = DEFAULT_THEME
+                        onResetSavePath()
                     }
                     .padding(18.dp)
             ) {
@@ -184,30 +212,13 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             // Footer Branding
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-            ) {
-                Text(
-                    text = "Crafted for Memories",
-                    fontSize = 13.sp,
-                    fontStyle = FontStyle.Italic,
-                    color = Color(0xFF94A3B8)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "COLLAGE STUDIO",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 2.sp,
-                    color = Color(0xFFCBD5E1)
-                )
-            }
+            BrandSignatureFooter()
         }
 
         // Resolution Bottom Sheet
         if (showResolutionSheet) {
             ModalBottomSheet(
+                sheetState = resolutionSheetState,
                 onDismissRequest = { showResolutionSheet = false },
                 containerColor = Color.White,
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
@@ -247,6 +258,61 @@ fun SettingsScreen(
                             }
                         )
                         Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+            }
+        }
+
+        // Export Format Bottom Sheet
+        if (showFormatSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showFormatSheet = false },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text("Select Export Format", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    listOf("JPEG (Best for Sharing)", "PNG (Lossless)", "WebP (Modern & Compact)").forEach { fmt ->
+                        val shortName = fmt.substringBefore(" ")
+                        ResolutionOptionCard(
+                            title = fmt,
+                            subtitle = "Recommended format for output files",
+                            selected = exportFormat == shortName,
+                            onClick = {
+                                exportFormat = shortName
+                                showFormatSheet = false
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+            }
+        }
+
+        // Theme Bottom Sheet
+        if (showThemeSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showThemeSheet = false },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text("App Theme", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    listOf("System Default", "Light Mode", "Dark Mode").forEach { th ->
+                        ResolutionOptionCard(
+                            title = th,
+                            subtitle = "Choose app color appearance",
+                            selected = themeMode == th,
+                            onClick = {
+                                themeMode = th
+                                showThemeSheet = false
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
                     Spacer(modifier = Modifier.height(24.dp))
                 }
@@ -343,9 +409,21 @@ fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(2.dp, RoundedCornerShape(18.dp))
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.White)
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = Color(0xFFCBD5E1),
+                spotColor = Color(0xFF94A3B8)
+            )
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFFFFFFFF))
+            .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(
+                    listOf(Color.White, Color(0xFFE2E8F0))
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
             .padding(vertical = 4.dp),
         content = content
     )
@@ -404,6 +482,61 @@ fun SettingsRow(
                 modifier = Modifier.size(20.dp)
             )
         }
+    }
+}
+
+@Composable
+fun SettingsSwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Surface(
+                color = Color(0xFFEFF6FF),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(imageVector = icon, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
+                }
+            }
+            Column {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1E293B)
+                )
+                if (subtitle != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF2563EB))
+        )
     }
 }
 

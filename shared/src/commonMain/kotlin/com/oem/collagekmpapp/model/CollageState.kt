@@ -64,6 +64,7 @@ data class LayoutTemplate(
 )
 
 sealed class Screen {
+    object HomeContainer : Screen()
     object Home : Screen()
     object Settings : Screen()
     data class SavePath(val selectedPath: String) : Screen()

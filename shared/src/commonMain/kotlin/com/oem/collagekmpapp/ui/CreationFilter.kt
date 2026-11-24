@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -60,18 +61,24 @@ private enum class CreationFilter(val label: String, val kind: CreationKind?) {
     ALL("All", null),
     COLLAGES("Collages", CreationKind.COLLAGE),
     FREESTYLE("Freestyle", CreationKind.FREESTYLE),
-    EDITED("Edited", CreationKind.EDITED)
+    EDITED("Edited", CreationKind.EDITED),
+    REMOVE_BG("Remove BG", CreationKind.REMOVE_BG)
 }
 
 private enum class CreationSort(val label: String) {
     NEWEST("Newest first"),
-    OLDEST("Oldest first")
+    OLDEST("Oldest first"),
+    NAME_ASC("Name (A-Z)"),
+    NAME_DESC("Name (Z-A)"),
+    SIZE_DESC("Largest size"),
+    SIZE_ASC("Smallest size")
 }
 
 private fun CreationKind.icon(): ImageVector = when (this) {
     CreationKind.COLLAGE -> Icons.Default.GridView
     CreationKind.FREESTYLE -> Icons.Default.Brush
     CreationKind.EDITED -> Icons.Default.Edit
+    CreationKind.REMOVE_BG -> Icons.Default.ContentCut
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,8 +131,14 @@ fun CreationsScreen(
             .filter { filter.kind == null || it.kind == filter.kind }
             .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
             .let { list ->
-                if (sort == CreationSort.NEWEST) list.sortedByDescending { it.dateMillis }
-                else list.sortedBy { it.dateMillis }
+                when (sort) {
+                    CreationSort.NEWEST -> list.sortedByDescending { it.dateMillis }
+                    CreationSort.OLDEST -> list.sortedBy { it.dateMillis }
+                    CreationSort.NAME_ASC -> list.sortedBy { it.name.lowercase() }
+                    CreationSort.NAME_DESC -> list.sortedByDescending { it.name.lowercase() }
+                    CreationSort.SIZE_DESC -> list.sortedByDescending { it.sizeBytes }
+                    CreationSort.SIZE_ASC -> list.sortedBy { it.sizeBytes }
+                }
             }
     }
 
@@ -209,8 +222,7 @@ fun CreationsScreen(
                     }
                 }
             }
-        },
-        bottomBar = { AppBottomBar(current = AppTab.Creations, onNavigate = onNavigate) }
+        }
     ) { inner ->
         Box(Modifier.fillMaxSize().padding(inner)) {
             when {
@@ -243,6 +255,9 @@ fun CreationsScreen(
                 ) {
                     items(visible, key = { it.id }) { c ->
                         CreationThumb(c, onClick = { sheetFor = c })
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        BrandSignatureFooter()
                     }
                 }
             }

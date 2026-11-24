@@ -118,6 +118,41 @@ private val FsStickers = mapOf(
 
 private val FsFonts = listOf("Modern", "Script", "Bold", "Retro", "Serif", "Neon")
 
+private data class AdjustOption(val name: String, val icon: ImageVector)
+
+private val adjustOptions = listOf(
+    AdjustOption("Brightness", Icons.Default.WbSunny),
+    AdjustOption("Contrast", Icons.Default.Contrast),
+    AdjustOption("Exposure", Icons.Default.Exposure),
+    AdjustOption("Highlight", Icons.Default.LightMode),
+    AdjustOption("Shadow", Icons.Default.Brightness2),
+    AdjustOption("Whites", Icons.Default.Brightness7),
+    AdjustOption("Blacks", Icons.Default.Brightness3),
+    AdjustOption("Dehaze", Icons.Default.FilterDrama),
+    AdjustOption("Saturation", Icons.Default.Palette),
+    AdjustOption("Hue", Icons.Default.ColorLens),
+    AdjustOption("Warmth", Icons.Default.WbIncandescent),
+    AdjustOption("Tint", Icons.Default.Gradient),
+    AdjustOption("Red", Icons.Default.Lens),
+    AdjustOption("Green", Icons.Default.Lens),
+    AdjustOption("Blue", Icons.Default.Lens),
+    AdjustOption("Sepia", Icons.Default.FilterVintage),
+    AdjustOption("Clarity", Icons.Default.Hd),
+    AdjustOption("Sharpen", Icons.Default.ChangeHistory),
+    AdjustOption("Blur", Icons.Default.BlurLinear),
+    AdjustOption("Soften", Icons.Default.Face),
+    AdjustOption("Glow", Icons.Default.AutoAwesome),
+    AdjustOption("Grain", Icons.Default.Grain),
+    AdjustOption("Vignette", Icons.Default.Vignette),
+    AdjustOption("Fade", Icons.Default.BlurOn)
+)
+
+private val adjustIconTints = mapOf(
+    "Red" to Color(0xFFEF4444),
+    "Green" to Color(0xFF22C55E),
+    "Blue" to Color(0xFF3B82F6)
+)
+
 // =================================================================== geometry helpers
 
 private fun fsRad(deg: Float) = (deg * PI / 180.0).toFloat()
@@ -461,7 +496,7 @@ fun FreestyleEditorScreen(
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     Column(
-                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         when (tool) {
@@ -618,32 +653,134 @@ fun FreestyleEditorScreen(
                             )
                             // ------------------------------------------------ ADJUST
                             FsTool.ADJUST -> {
-                                val def = AdjustTools.def(adjustItem)
-                                val cur = adjustValues[adjustItem] ?: 0f
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("$adjustItem: ${if (cur > 0 && def.isBipolar) "+" else ""}${cur.toInt()}%",
-                                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                                    Text("Reset all", fontSize = 12.sp, color = Color(0xFF2563EB),
-                                        modifier = Modifier.clickable { adjustValues = emptyMap() })
-                                }
-                                FluidSlider(
-                                    value = cur,
-                                    onValueChange = { adjustValues = adjustValues + (adjustItem to it) },
-                                    valueRange = def.min..def.max,
-                                    modifier = Modifier.fillMaxWidth().height(36.dp)
-                                )
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(AdjustTools.groups) { g ->
-                                        FsChip(g, adjustGroup == g) {
-                                            adjustGroup = g
-                                            AdjustTools.inGroup(g).firstOrNull()?.let { adjustItem = it.name }
+                                val adjustDef = AdjustTools.def(adjustItem)
+                                val currentValue = adjustValues[adjustItem] ?: 0f
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "$adjustItem: ${if (currentValue > 0 && adjustDef.isBipolar) "+" else ""}${currentValue.toInt()}%",
+                                                fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
+                                            )
+                                            Text(
+                                                "Reset all",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF2563EB),
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable { adjustValues = emptyMap() }
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        FluidSlider(
+                                            value = currentValue,
+                                            onValueChange = { newVal ->
+                                                adjustValues = adjustValues + (adjustItem to newVal)
+                                            },
+                                            valueRange = adjustDef.min..adjustDef.max,
+                                            modifier = Modifier.fillMaxWidth().height(36.dp)
+                                        )
+                                    }
+
+                                    // group tabs: Light / Color / Detail / Effects
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(AdjustTools.groups) { group ->
+                                            val active = group == adjustGroup
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(CircleShape)
+                                                    .background(if (active) Color(0xFF0F172A) else Color(0xFFF1F5F9))
+                                                    .clickable {
+                                                        adjustGroup = group
+                                                        AdjustTools.inGroup(group).firstOrNull()?.let { adjustItem = it.name }
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = group,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (active) Color.White else Color(0xFF475569)
+                                                )
+                                            }
                                         }
                                     }
-                                }
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(AdjustTools.inGroup(adjustGroup)) { d ->
-                                        val active = (adjustValues[d.name] ?: 0f) != 0f
-                                        FsChip(d.name + if (active) " •" else "", adjustItem == d.name) { adjustItem = d.name }
+
+                                    val groupNames = remember(adjustGroup) {
+                                        AdjustTools.inGroup(adjustGroup).map { it.name }
+                                    }
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(adjustOptions.filter { it.name in groupNames }) { option ->
+                                            val isSelected = adjustItem == option.name
+                                            val isActive = (adjustValues[option.name] ?: 0f) != 0f
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(72.dp)
+                                                    .height(68.dp)
+                                                    .shadow(4.dp, RoundedCornerShape(12.dp))
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(
+                                                        if (isSelected) {
+                                                            Brush.verticalGradient(listOf(Color(0xFFEFF6FF), Color(0xFFDBEAFE)))
+                                                        } else {
+                                                            Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF8FAFC)))
+                                                        }
+                                                    )
+                                                    .border(
+                                                        width = if (isSelected) 2.dp else 1.dp,
+                                                        color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
+                                                        shape = RoundedCornerShape(12.dp)
+                                                    )
+                                                    .clickable { adjustItem = option.name },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = option.icon,
+                                                        contentDescription = option.name,
+                                                        tint = adjustIconTints[option.name]
+                                                            ?: if (isSelected) Color(0xFF2563EB) else Color(0xFF475569),
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = option.name,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (isSelected) Color(0xFF2563EB) else Color(0xFF334155),
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                                if (isActive) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(6.dp)
+                                                            .size(6.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color(0xFF2563EB))
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

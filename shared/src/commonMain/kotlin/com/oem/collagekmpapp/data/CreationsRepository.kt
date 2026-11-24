@@ -11,7 +11,8 @@ import androidx.compose.runtime.Composable
 enum class CreationKind(val label: String, val filePrefix: String) {
     COLLAGE("Collage", "Collage"),
     FREESTYLE("Freestyle", "Freestyle"),
-    EDITED("Edited", "Edited");
+    EDITED("Edited", "Edited"),
+    REMOVE_BG("Remove BG", "RemoveBG");
 
     /** e.g. `Freestyle_1764000000000.jpg` */
     fun newFileName(extension: String, timestampMillis: Long): String =
@@ -19,6 +20,7 @@ enum class CreationKind(val label: String, val filePrefix: String) {
 
     companion object {
         fun fromFileName(name: String): CreationKind = when {
+            name.startsWith("RemoveBG", ignoreCase = true) -> REMOVE_BG
             name.startsWith("Freestyle", ignoreCase = true) -> FREESTYLE
             name.startsWith("Edit", ignoreCase = true) -> EDITED
             else -> COLLAGE

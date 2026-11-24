@@ -12,19 +12,33 @@ import com.oem.collagekmpapp.ui.HomeScreen
 import com.oem.collagekmpapp.ui.RemoveBackgroundScreen
 import com.oem.collagekmpapp.ui.SettingsScreen
 import com.oem.collagekmpapp.ui.SinglePhotoEditorScreen
+import com.oem.collagekmpapp.ui.HomeContainer
 
 @Composable
 @Preview
 fun App() {
     MaterialTheme {
-        var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
         var selectedSavePath by remember { mutableStateOf("/Pictures/CollageStudio") }
+        val backStack = remember { mutableStateListOf<Screen>(Screen.HomeContainer) }
+        val currentScreen = backStack.lastOrNull() ?: Screen.HomeContainer
+
+        BackHandler(enabled = backStack.size > 1) {
+            backStack.removeLastOrNull()
+        }
 
         when (val screen = currentScreen) {
+            is Screen.HomeContainer -> {
+                HomeContainer(
+                    selectedSavePath = selectedSavePath,
+                    onNavigate = { targetScreen ->
+                        backStack.add(targetScreen)
+                    }
+                )
+            }
             is Screen.Home -> {
                 HomeScreen(
                     onNavigate = { targetScreen ->
-                        currentScreen = targetScreen
+                        backStack.add(targetScreen)
                     }
                 )
             }
@@ -32,43 +46,49 @@ fun App() {
                 SettingsScreen(
                     selectedSavePath = selectedSavePath,
                     onNavigate = { targetScreen ->
-                        currentScreen = targetScreen
+                        backStack.add(targetScreen)
                     }
                 )
             }
             is Screen.SavePath -> {
                 SavePathScreen(
                     selectedPath = screen.selectedPath,
-                    onBack = { currentScreen = Screen.Settings },
+                    onBack = { backStack.removeLastOrNull() },
                     onSelect = { path ->
                         selectedSavePath = path
-                        currentScreen = Screen.Settings
+                        backStack.removeLastOrNull()
                     }
                 )
             }
             is Screen.Feedback -> {
                 FeedbackScreen(
-                    onBack = { currentScreen = Screen.Settings },
-                    onNavigate = { targetScreen -> currentScreen = targetScreen }
+                    onBack = { backStack.removeLastOrNull() },
+                    onNavigate = { targetScreen -> backStack.add(targetScreen) }
                 )
             }
             is Screen.Creations -> {
                 CreationsScreen(
                     savePath = selectedSavePath,
-                    onNavigate = { targetScreen -> currentScreen = targetScreen }
+                    onNavigate = { targetScreen -> backStack.add(targetScreen) }
                 )
             }
             is Screen.LayoutSelection -> {
                 val count = screen.selectedPhotos.size.coerceAtLeast(1)
                 val defaultLayoutId = com.oem.collagekmpapp.data.LayoutRepository().getLayouts(count).firstOrNull()?.id ?: "layout_2_vertical"
-                currentScreen = Screen.Editor(defaultLayoutId, screen.selectedPhotos)
+                CollageEditorScreen(
+                    layoutId = defaultLayoutId,
+                    selectedPhotos = screen.selectedPhotos,
+                    onBack = {
+                        backStack.removeLastOrNull()
+                    }
+                )
             }
             is Screen.Editor -> {
                 CollageEditorScreen(
                     layoutId = screen.layoutId,
                     selectedPhotos = screen.selectedPhotos,
                     onBack = {
-                        currentScreen = Screen.Home
+                        backStack.removeLastOrNull()
                     }
                 )
             }
@@ -76,7 +96,7 @@ fun App() {
                 FreestyleEditorScreen(
                     selectedPhotos = screen.selectedPhotos,
                     onBack = {
-                        currentScreen = Screen.Home
+                        backStack.removeLastOrNull()
                     }
                 )
             }
@@ -84,7 +104,7 @@ fun App() {
                 SinglePhotoEditorScreen(
                     photoUri = screen.photoUri,
                     onBack = {
-                        currentScreen = Screen.Home
+                        backStack.removeLastOrNull()
                     }
                 )
             }
@@ -92,7 +112,7 @@ fun App() {
                 RemoveBackgroundScreen(
                     photoUri = screen.photoUri,
                     onBack = {
-                        currentScreen = Screen.Home
+                        backStack.removeLastOrNull()
                     }
                 )
             }

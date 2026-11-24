@@ -97,20 +97,18 @@ fun HomeScreen(
                     Text(errorMessage!!, color = Color.White)
                 }
             }
-        },
-        bottomBar = {
-            AppBottomBar(current = AppTab.Home, onNavigate = onNavigate)
         }
     ) { innerPadding ->
         AnimatedVisibility(
             visible = visible,
             enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)) +
                     slideInVertically(animationSpec = tween(400, easing = FastOutSlowInEasing), initialOffsetY = { it / 10 })
-        ) {
+        )
+        {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFFF8FAFC))
+                    .background(Color(0xFFEDF2F7))
                     .padding(innerPadding)
                     .verticalScroll(scrollState)
                     .padding(horizontal = 20.dp, vertical = 16.dp),
@@ -182,92 +180,44 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Middle Row: 2 Cards (Grid Collage & Added Photos)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                // Grid Collage Card (Full Width)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .shadow(4.dp, RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0xFF3B82F6), Color(0xFF0EA5E9))
+                            )
+                        )
+                        .clickable { galleryPicker.launch() }
+                        .padding(20.dp)
                 ) {
-                    // Left Card: Grid Collage
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(160.dp)
-                            .shadow(4.dp, RoundedCornerShape(22.dp))
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color(0xFF3B82F6), Color(0xFF0EA5E9))
-                                )
-                            )
-                            .clickable { galleryPicker.launch() }
-                            .padding(18.dp)
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.GridOn,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp).align(Alignment.End)
+                        Icon(
+                            imageVector = Icons.Default.GridOn,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp).align(Alignment.End)
+                        )
+                        Column {
+                            Text(
+                                text = "Grid Collage",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
                             )
-                            Column {
-                                Text(
-                                    text = "Grid Collage",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Up to 50 photos",
-                                    fontSize = 12.sp,
-                                    color = Color.White.copy(alpha = 0.85f)
-                                )
-                            }
-                        }
-                    }
-
-                    // Right Card: Added Photos
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(160.dp)
-                            .shadow(4.dp, RoundedCornerShape(22.dp))
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color(0xFF10B981), Color(0xFF059669))
-                                )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Up to 50 photos",
+                                fontSize = 13.sp,
+                                color = Color.White.copy(alpha = 0.85f)
                             )
-                            .clickable { galleryPicker.launch() }
-                            .padding(18.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PhotoLibrary,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp).align(Alignment.End)
-                            )
-                            Column {
-                                Text(
-                                    text = "Added Photos",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Manage selected shots",
-                                    fontSize = 12.sp,
-                                    color = Color.White.copy(alpha = 0.85f)
-                                )
-                            }
                         }
                     }
                 }
@@ -447,25 +397,7 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 // Footer Branding
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-                ) {
-                    Text(
-                        text = "Crafted for Memories",
-                        fontSize = 13.sp,
-                        fontStyle = FontStyle.Italic,
-                        color = Color(0xFF94A3B8)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "COLLAGE STUDIO",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 2.sp,
-                        color = Color(0xFFCBD5E1)
-                    )
-                }
+                BrandSignatureFooter()
 
                 // =========================================================================
                 // OTHER CARDS COMMENTED OUT AS REQUESTED (for future implementation)

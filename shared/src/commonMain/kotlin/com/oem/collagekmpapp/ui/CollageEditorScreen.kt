@@ -337,7 +337,7 @@ fun CollageEditorScreen(
                     when (selectedTab) {
                         EditorTool.RATIO -> {
                             Column(
-                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
+                                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Text("Canvas Aspect Ratio", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
@@ -479,7 +479,7 @@ fun CollageEditorScreen(
                                 },
                                 onIntensityChange = { filterIntensity = it },
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .fillMaxWidth()
                                     .verticalScroll(rememberScrollState())
                                     .padding(vertical = 4.dp)
                             )
@@ -493,7 +493,7 @@ fun CollageEditorScreen(
 
                             Column(
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .fillMaxWidth()
                                     .verticalScroll(rememberScrollState())
                                     .animateContentSize()
                                     .padding(vertical = 4.dp),
@@ -589,7 +589,7 @@ fun CollageEditorScreen(
                             val currentValue = adjustValues[selectedAdjustItem] ?: 0f
                             Column(
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .fillMaxWidth()
                                     .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -867,7 +867,7 @@ fun CollageEditorScreen(
                         EditorTool.BACKGROUND -> {
                             Column(
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .fillMaxWidth()
                                     .verticalScroll(rememberScrollState())
                                     .padding(vertical = 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -985,7 +985,7 @@ fun CollageEditorScreen(
                         }
                         EditorTool.DRAW -> {
                             Column(
-                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Text("Draw & Brush", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))

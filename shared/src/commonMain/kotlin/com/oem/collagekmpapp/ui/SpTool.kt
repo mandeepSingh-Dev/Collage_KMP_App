@@ -659,7 +659,7 @@ fun SinglePhotoEditorScreen(
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     Column(
-                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         when (tool) {
