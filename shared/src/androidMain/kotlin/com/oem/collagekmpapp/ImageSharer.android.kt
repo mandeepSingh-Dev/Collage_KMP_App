@@ -237,14 +237,15 @@ actual class ImageSharer(private val context: android.content.Context) {
                     contentResolver.update(imageUri, contentValues, null, null)
                 }
 
-                val viewIntent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(imageUri, "image/*")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                val chooser = Intent.createChooser(viewIntent, "Open with").apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(chooser)
+                // Disabled auto-opening photos app after saving to gallery per user request
+                // val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                //     setDataAndType(imageUri, "image/*")
+                //     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                // }
+                // val chooser = Intent.createChooser(viewIntent, "Open with").apply {
+                //     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                // }
+                // context.startActivity(chooser)
             }
         } catch (e: Exception) {
             e.printStackTrace()

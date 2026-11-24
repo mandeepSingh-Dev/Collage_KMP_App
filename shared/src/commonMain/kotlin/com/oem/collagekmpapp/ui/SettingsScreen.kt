@@ -25,14 +25,15 @@ import com.oem.collagekmpapp.model.Screen
 @Composable
 fun SettingsScreen(
     onNavigate: (Screen) -> Unit,
-    selectedSavePath: String = "/Pictures/CollageStudio"
+    selectedSavePath: String = DEFAULT_SAVE_PATH,
+    onResetSavePath: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
 
     // Settings states
-    var selectedResolution by remember { mutableStateOf("Standard Resolution (720p)") }
-    var selectedLanguage by remember { mutableStateOf("English (Default)") }
-    var exportFormat by remember { mutableStateOf("JPEG") }
+    var selectedResolution by remember { mutableStateOf(DEFAULT_RESOLUTION) }
+    var selectedLanguage by remember { mutableStateOf(DEFAULT_LANGUAGE) }
+    var exportFormat by remember { mutableStateOf(DEFAULT_FORMAT) }
     var imageQuality by remember { mutableFloatStateOf(90f) }
     var watermarkEnabled by remember { mutableStateOf(false) }
     var themeMode by remember { mutableStateOf(DEFAULT_THEME) }
