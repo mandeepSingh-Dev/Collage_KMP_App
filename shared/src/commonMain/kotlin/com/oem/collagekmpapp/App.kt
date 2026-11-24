@@ -18,6 +18,10 @@ import com.oem.collagekmpapp.ui.HomeContainer
 @Preview
 fun App() {
     MaterialTheme {
+        // global, persisted settings (resolution / format / watermark / ...) used by every export screen
+        val keyValueStore = rememberKeyValueStore()
+        remember(keyValueStore) { AppSettings.attach(keyValueStore); true }
+
         var selectedSavePath by remember { mutableStateOf("/Pictures/CollageStudio") }
         val backStack = remember { mutableStateListOf<Screen>(Screen.HomeContainer) }
         val currentScreen = backStack.lastOrNull() ?: Screen.HomeContainer
@@ -87,6 +91,7 @@ fun App() {
                 CollageEditorScreen(
                     layoutId = screen.layoutId,
                     selectedPhotos = screen.selectedPhotos,
+                    templateId = screen.templateId,
                     onBack = {
                         backStack.removeLastOrNull()
                     }

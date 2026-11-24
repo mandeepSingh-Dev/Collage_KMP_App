@@ -104,6 +104,9 @@ object PhotoLook {
         if (work != null && work !== bitmap) work.recycle()
     }
 
+    /** Public gaussian-style blur (sigma ~ radius px) for other renderers (e.g. Freestyle background). Returns a NEW bitmap. */
+    fun blurBitmap(src: Bitmap, radius: Float): Bitmap = blur(src, radius.coerceAtLeast(0.5f))
+
     /** Vignette. strength > 0 darkens the edges, < 0 lightens them (white vignette). */
     fun drawVignette(canvas: Canvas, rect: RectF, strength: Float) {
         val s = kotlin.math.abs(strength)

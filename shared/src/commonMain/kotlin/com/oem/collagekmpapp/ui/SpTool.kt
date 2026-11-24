@@ -75,6 +75,8 @@ import com.oem.collagekmpapp.FreestyleItem
 import com.oem.collagekmpapp.FreestyleItemKind
 import com.oem.collagekmpapp.FreestyleProject
 import com.oem.collagekmpapp.PhotoColorEngine
+import com.oem.collagekmpapp.USE_LEGACY_EXPORT_DIALOG
+import com.oem.collagekmpapp.UnifiedExportScreen
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.model.*
 import com.oem.collagekmpapp.newFreestyleEmoji
@@ -1238,8 +1240,36 @@ fun SinglePhotoEditorScreen(
         )
     }
 
-    // =============================================================== export dialog
+    // =============================================================== unified export screen
     if (showExport) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showExport = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+            )
+        ) {
+            UnifiedExportScreen(
+                previewAspect = (ratioOverride ?: visualCroppedRatio).coerceIn(0.2f, 5f),
+                shareFallbackUri = photoUri,
+                onBack = { showExport = false },
+                onExport = { longSide, format, onResult ->
+                    selectedId = null
+                    exporter.export(buildEdit(), longSide, format) { result -> onResult(result) }
+                }
+            ) {
+                // before saving: the photo being edited; after saving: the real exported file
+                coil3.compose.AsyncImage(
+                    model = photoUri,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+
+    // =============================================================== export dialog (legacy, switched off)
+    if (showExport && USE_LEGACY_EXPORT_DIALOG) {
         AlertDialog(
             onDismissRequest = { if (!isSaving) showExport = false },
             title = { Text("Save photo") },

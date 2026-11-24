@@ -21,12 +21,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -54,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.AdjustTools
 import com.oem.collagekmpapp.FilterPickerPanel
+import com.oem.collagekmpapp.OverlayMetrics
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberGalleryPicker
 import com.oem.collagekmpapp.model.*
@@ -112,9 +116,14 @@ data class AdjustOption(
 fun CollageEditorScreen(
     layoutId: String,
     selectedPhotos: List<String>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    /** Optional themed template: its gradient, spacing, filter, text and decorations are applied up front. */
+    templateId: String? = null
 ) {
-    var selectedTab by remember { mutableStateOf(EditorTool.LAYOUT) }
+    val template = remember(templateId) { com.oem.collagekmpapp.data.TemplateRepository.byId(templateId) }
+    var selectedTab by remember(selectedPhotos.size) {
+        mutableStateOf(if (selectedPhotos.size <= 1) EditorTool.RATIO else EditorTool.LAYOUT)
+    }
     var currentLayoutId by remember { mutableStateOf(layoutId) }
 
     val layoutRepo = remember { com.oem.collagekmpapp.data.LayoutRepository() }
@@ -126,14 +135,49 @@ fun CollageEditorScreen(
 
     var currentSlots by remember(currentLayoutId) { mutableStateOf(currentLayout.slots) }
     var selectedSlotIndex by remember(currentLayoutId) { mutableStateOf<Int?>(null) }
-    var aspectRatio by remember { mutableStateOf(AspectRatio.SQUARE) }
-    var borderSettings by remember { mutableStateOf(BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)) }
+    var aspectRatio by remember {
+        mutableStateOf(
+            template?.let { t ->
+                AspectRatio.entries.firstOrNull { it.widthRatio == t.preset.aspectRatioWidth && it.heightRatio == t.preset.aspectRatioHeight }
+            } ?: AspectRatio.SQUARE
+        )
+    }
+    var borderSettings by remember {
+        mutableStateOf(
+            if (template != null) BorderSettings(
+                outerSpacing = template.preset.outerSpacingRatio * 360f,
+                cornerRadius = template.preset.cornerRadiusRatio * 360f,
+                spacing = template.preset.innerSpacingRatio * 360f
+            ) else BorderSettings(outerSpacing = 12f, cornerRadius = 22f, spacing = 8f)
+        )
+    }
     var photoTransforms by remember { mutableStateOf<Map<Int, PhotoTransform>>(emptyMap()) }
     var canvasSizePx by remember { mutableStateOf(IntSize.Zero) }
 
+    // ---- Preview/export parity helpers -------------------------------------------------------
+    // Overlay sizes are defined against a 360-unit reference canvas width (OverlayMetrics) and
+    // scaled to the live canvas, so the preview and the exported bitmap use the same ratios.
+    val uiDensity = LocalDensity.current
+    val refUnitPx = if (canvasSizePx.width > 0) canvasSizePx.width / OverlayMetrics.REF_WIDTH else uiDensity.density
+    val refDp: (Float) -> androidx.compose.ui.unit.Dp = { v -> with(uiDensity) { (v * refUnitPx).toDp() } }
+    val refSp: (Float) -> androidx.compose.ui.unit.TextUnit = { v -> with(uiDensity) { (v * refUnitPx).toSp() } }
+    val overlayTextStyle: (String, Color) -> TextStyle = { font, col ->
+        val size = refSp(OverlayMetrics.textFont(font))
+        when (font) {
+            "Script" -> TextStyle(fontStyle = FontStyle.Italic, fontWeight = FontWeight.Bold, fontSize = size, color = col)
+            "Bold" -> TextStyle(fontWeight = FontWeight.Bold, fontSize = size, color = col)
+            "Retro" -> TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = size, color = col)
+            "Serif" -> TextStyle(fontFamily = FontFamily.Serif, fontSize = size, color = col)
+            "Neon" -> TextStyle(fontWeight = FontWeight.Bold, fontSize = size, color = col,
+                shadow = Shadow(color = col, blurRadius = OverlayMetrics.NEON_BLUR * refUnitPx))
+            else -> TextStyle(fontWeight = FontWeight.Medium, fontSize = size, color = col)
+        }
+    }
+    var editingTextId by remember { mutableStateOf<String?>(null) }
+
     // Filter & Glitter states
-    var filterIntensity by remember { mutableStateOf(0f) }
-    var selectedPreset by remember { mutableStateOf("Original") }
+    var filterIntensity by remember { mutableStateOf(template?.preset?.filterIntensity ?: 0f) }
+    var selectedPreset by remember { mutableStateOf(template?.preset?.filterPreset ?: "Original") }
     var glitterDensity by remember { mutableStateOf(0f) }
     var selectedGlitterCard by remember { mutableStateOf("Glitz") }
 
@@ -151,7 +195,7 @@ fun CollageEditorScreen(
     // Color Grading / Adjust states with -50 to 50 range and neutral at 0
     var selectedAdjustItem by remember { mutableStateOf("Brightness") }
     var selectedAdjustGroup by remember { mutableStateOf("Light") }
-    var adjustValues by remember { mutableStateOf(mapOf(
+    var adjustValues by remember { mutableStateOf((mapOf(
         "Brightness" to 0f,
         "Contrast" to 0f,
         "Highlight" to 0f,
@@ -160,7 +204,7 @@ fun CollageEditorScreen(
         "Warmth" to 0f,
         "Tint" to 0f,
         "Fade" to 0f
-    )) }
+    ) + (template?.preset?.adjustValues ?: emptyMap()))) }
 
     // Text typography states with custom color list
     var selectedFont by remember { mutableStateOf("Script") }
@@ -170,9 +214,14 @@ fun CollageEditorScreen(
     var showAddTextDialog by remember { mutableStateOf(false) }
 
     // Background settings states matching 09_background_settings_screen.svg
-    var canvasBgColor by remember { mutableStateOf<Color>(Color.White) }
-    var canvasBgGradient by remember { mutableStateOf<Brush?>(null) }
-    var canvasBgGradientColors by remember { mutableStateOf(emptyList<Color>()) }
+    var canvasBgColor by remember { mutableStateOf<Color>(template?.let { Color(it.preset.backgroundColorLong.toInt()) } ?: Color.White) }
+    var canvasBgGradient by remember {
+        mutableStateOf<Brush?>(
+            template?.preset?.backgroundGradientColors?.takeIf { it.size >= 2 }
+                ?.let { cols -> Brush.linearGradient(cols.map { Color(it.toInt()) }) }
+        )
+    }
+    var canvasBgGradientColors by remember { mutableStateOf(template?.preset?.backgroundGradientColors?.map { Color(it.toInt()) } ?: emptyList<Color>()) }
     var backgroundFade by remember { mutableStateOf(0f) }
     var selectedBackgroundPhoto by remember { mutableStateOf<String?>(null) }
 
@@ -189,6 +238,41 @@ fun CollageEditorScreen(
     // Stickers overlay items list (emojis and gallery photo stickers)
     var overlayItems by remember { mutableStateOf(listOf<OverlayItem>()) }
     var selectedOverlayId by remember { mutableStateOf<String?>(null) }
+
+    // Template decorations (emoji stickers + text) are stored normalised; convert them to canvas-pixel
+    // overlay items once the canvas has been measured, so they stay movable/editable like any sticker.
+    var templateDecorApplied by remember { mutableStateOf(false) }
+    LaunchedEffect(canvasSizePx, template) {
+        val t = template
+        if (t != null && !templateDecorApplied && canvasSizePx.width > 0 && canvasSizePx.height > 0) {
+            templateDecorApplied = true
+            val cw = canvasSizePx.width.toFloat()
+            val ch = canvasSizePx.height.toFloat()
+            val decor = t.preset.overlays.mapNotNull { o ->
+                (o as? com.oem.collagekmpapp.model.ProjectOverlayItem.Emoji)?.let {
+                    OverlayItem.Emoji(
+                        id = "tpl_emoji_${kotlin.random.Random.nextLong().toULong()}",
+                        emoji = it.emoji,
+                        offset = Offset((it.x - 0.5f) * cw, (it.y - 0.5f) * ch),
+                        rotation = it.rotation,
+                        scale = it.scale
+                    )
+                }
+            }
+            val texts = t.preset.textLayers.map {
+                OverlayItem.Text(
+                    id = "tpl_text_${kotlin.random.Random.nextLong().toULong()}",
+                    text = it.text,
+                    font = it.fontName,
+                    textColor = Color(it.colorLong.toInt()),
+                    offset = Offset((it.x - 0.5f) * cw, (it.y - 0.5f) * ch),
+                    rotation = it.rotation,
+                    scale = it.scale
+                )
+            }
+            overlayItems = overlayItems + decor + texts
+        }
+    }
 
     val photoStickerPicker = rememberGalleryPicker { selectedUris ->
         if (selectedUris.isNotEmpty()) {
@@ -274,33 +358,35 @@ fun CollageEditorScreen(
     val brushColors = sharedColors
     val textColors = sharedColors
 
-    val gradients = listOf(
-        Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFFACC15), Color(0xFF22C55E), Color(0xFF3B82F6))),
-        Brush.linearGradient(listOf(Color(0xFFF43F5E), Color(0xFFFBBF24))),
-        Brush.linearGradient(listOf(Color(0xFFFB923C), Color(0xFFF472B6), Color(0xFF38BDF8))),
-        Brush.linearGradient(listOf(Color(0xFF34D399), Color(0xFF2563EB))),
-        Brush.linearGradient(listOf(Color(0xFFF5D0FE), Color(0xFF93C5FD))),
-        Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF7DD3FC))),
-        Brush.linearGradient(listOf(Color(0xFFFF007F), Color(0xFFFF758C), Color(0xFFFF7EB3))),
-        Brush.linearGradient(listOf(Color(0xFF651FFF), Color(0xFF00E5FF))),
-        Brush.linearGradient(listOf(Color(0xFFFF9100), Color(0xFFFFEA00))),
-        Brush.linearGradient(listOf(Color(0xFF00E676), Color(0xFF1DE9B6))),
-        Brush.linearGradient(listOf(Color(0xFFF50057), Color(0xFFFF4081))),
-        Brush.linearGradient(listOf(Color(0xFF3D5AFE), Color(0xFF2F80ED))),
-        Brush.linearGradient(listOf(Color(0xFFFF3D00), Color(0xFFFF9100))),
-        Brush.linearGradient(listOf(Color(0xFF1A237E), Color(0xFF3949AB))),
-        Brush.linearGradient(listOf(Color(0xFF004D40), Color(0xFF00897B))),
-        Brush.linearGradient(listOf(Color(0xFFB71C1C), Color(0xFFD32F2F))),
-        Brush.linearGradient(listOf(Color(0xFF4A148C), Color(0xFF7B1FA2))),
-        Brush.linearGradient(listOf(Color(0xFF880E4F), Color(0xFFC2185B))),
-        Brush.linearGradient(listOf(Color(0xFF0D47A1), Color(0xFF1976D2))),
-        Brush.linearGradient(listOf(Color(0xFF006064), Color(0xFF00ACC1))),
-        Brush.linearGradient(listOf(Color(0xFF33691E), Color(0xFF689F38))),
-        Brush.linearGradient(listOf(Color(0xFFE65100), Color(0xFFF57C00))),
-        Brush.linearGradient(listOf(Color(0xFF3E2723), Color(0xFF5D4037))),
-        Brush.linearGradient(listOf(Color(0xFF263238), Color(0xFF455A64))),
-        Brush.linearGradient(listOf(Color(0xFFFF8A80), Color(0xFFFF80AB)))
+    // One list of colour stops drives BOTH the swatch/preview brush and the exported gradient.
+    val gradientColorSets: List<List<Color>> = listOf(
+        listOf(Color(0xFFEF4444), Color(0xFFFACC15), Color(0xFF22C55E), Color(0xFF3B82F6)),
+        listOf(Color(0xFFF43F5E), Color(0xFFFBBF24)),
+        listOf(Color(0xFFFB923C), Color(0xFFF472B6), Color(0xFF38BDF8)),
+        listOf(Color(0xFF34D399), Color(0xFF2563EB)),
+        listOf(Color(0xFFF5D0FE), Color(0xFF93C5FD)),
+        listOf(Color(0xFF0F172A), Color(0xFF7DD3FC)),
+        listOf(Color(0xFFFF007F), Color(0xFFFF758C), Color(0xFFFF7EB3)),
+        listOf(Color(0xFF651FFF), Color(0xFF00E5FF)),
+        listOf(Color(0xFFFF9100), Color(0xFFFFEA00)),
+        listOf(Color(0xFF00E676), Color(0xFF1DE9B6)),
+        listOf(Color(0xFFF50057), Color(0xFFFF4081)),
+        listOf(Color(0xFF3D5AFE), Color(0xFF2F80ED)),
+        listOf(Color(0xFFFF3D00), Color(0xFFFF9100)),
+        listOf(Color(0xFF1A237E), Color(0xFF3949AB)),
+        listOf(Color(0xFF004D40), Color(0xFF00897B)),
+        listOf(Color(0xFFB71C1C), Color(0xFFD32F2F)),
+        listOf(Color(0xFF4A148C), Color(0xFF7B1FA2)),
+        listOf(Color(0xFF880E4F), Color(0xFFC2185B)),
+        listOf(Color(0xFF0D47A1), Color(0xFF1976D2)),
+        listOf(Color(0xFF006064), Color(0xFF00ACC1)),
+        listOf(Color(0xFF33691E), Color(0xFF689F38)),
+        listOf(Color(0xFFE65100), Color(0xFFF57C00)),
+        listOf(Color(0xFF3E2723), Color(0xFF5D4037)),
+        listOf(Color(0xFF263238), Color(0xFF455A64)),
+        listOf(Color(0xFFFF8A80), Color(0xFFFF80AB))
     )
+    val gradients = gradientColorSets.map { Brush.linearGradient(it) }
 
     val brushTypes = listOf("Pen", "Eraser")
 
@@ -345,8 +431,8 @@ fun CollageEditorScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    items(AspectRatio.entries) { ratio ->
-                                        val isSelected = aspectRatio == ratio
+                                    items(AspectRatio.entries.distinctBy { it.displayName }) { ratio ->
+                                        val isSelected = aspectRatio.displayName == ratio.displayName
                                         Box(
                                             modifier = Modifier
                                                 .width(76.dp)
@@ -414,7 +500,15 @@ fun CollageEditorScreen(
                                                     color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
                                                     shape = RoundedCornerShape(10.dp)
                                                 )
-                                                .clickable { currentLayoutId = layout.id },
+                                                .clickable {
+                                                    currentLayoutId = layout.id
+                                                    val newLayout = layoutRepo.getAllLayouts().find { it.id == layout.id }
+                                                        ?: layoutRepo.getLayouts(selectedPhotos.size.coerceAtLeast(1)).firstOrNull()
+                                                    if (newLayout != null) {
+                                                        currentSlots = newLayout.slots
+                                                    }
+                                                    selectedSlotIndex = null
+                                                },
                                             contentAlignment = Alignment.Center
                                         ) {
                                             // Miniature Vector Grid Thumbnail Preview matching FunPic style
@@ -795,11 +889,21 @@ fun CollageEditorScreen(
                                 ) {
                                     Text(
                                         text = "+ Add Text",
-                                        fontSize = 15.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF1E293B),
-                                        modifier = Modifier.clickable { showAddTextDialog = true }
+                                        modifier = Modifier.clickable { editingTextId = null; showAddTextDialog = true }
                                     )
+                                    val selectedTextItem = overlayItems.firstOrNull { it.id == selectedOverlayId } as? OverlayItem.Text
+                                    if (selectedTextItem != null) {
+                                        Text(
+                                            text = "Edit text",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF2563EB),
+                                            modifier = Modifier.clickable { editingTextId = selectedTextItem.id; showAddTextDialog = true }
+                                        )
+                                    }
                                     Text(
                                         text = "Font: $selectedFont",
                                         fontSize = 12.sp,
@@ -824,12 +928,16 @@ fun CollageEditorScreen(
                                                     color = if (isSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
                                                     shape = CircleShape
                                                 )
-                                                .clickable { textColor = col }
+                                                .clickable {
+                                                    textColor = col
+                                                    overlayItems = overlayItems.map {
+                                                        if (it.id == selectedOverlayId && it is OverlayItem.Text) it.copy(textColor = col) else it
+                                                    }
+                                                }
                                         )
                                     }
                                 }
 
-                                val hasText = collageText.isNotBlank()
                                 LazyVerticalGrid(
                                     columns = GridCells.Fixed(3),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -842,7 +950,6 @@ fun CollageEditorScreen(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .height(36.dp)
-                                                .alpha(if (hasText) 1f else 0.4f)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF8FAFC))
                                                 .border(
@@ -850,7 +957,12 @@ fun CollageEditorScreen(
                                                     color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFFCBD5E1),
                                                     shape = RoundedCornerShape(8.dp)
                                                 )
-                                                .clickable(enabled = hasText) { selectedFont = font },
+                                                .clickable {
+                                                    selectedFont = font
+                                                    overlayItems = overlayItems.map {
+                                                        if (it.id == selectedOverlayId && it is OverlayItem.Text) it.copy(font = font) else it
+                                                    }
+                                                },
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
@@ -872,7 +984,7 @@ fun CollageEditorScreen(
                                     .padding(vertical = 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text("Background", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                Text("Background", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
                                 Text("Solid Colors", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
                                 LazyRow(
@@ -902,37 +1014,21 @@ fun CollageEditorScreen(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    items(gradients) { grad ->
+                                    itemsIndexed(gradients) { gIndex, grad ->
+                                        val gSelected = selectedBackgroundPhoto == null && canvasBgGradientColors == gradientColorSets[gIndex]
                                         Box(
                                             modifier = Modifier
                                                 .size(32.dp)
                                                 .clip(CircleShape)
                                                 .background(grad)
-                                                .border(1.dp, Color(0xFFCBD5E1), CircleShape)
+                                                .border(
+                                                    width = if (gSelected) 2.5.dp else 1.dp,
+                                                    color = if (gSelected) Color(0xFF2563EB) else Color(0xFFCBD5E1),
+                                                    shape = CircleShape
+                                                )
                                                 .clickable {
                                                     canvasBgGradient = grad
-                                                    canvasBgGradientColors = when (gradients.indexOf(grad)) {
-                                                        0 -> listOf(Color(0xFFEF4444), Color(0xFFFACC15), Color(0xFF22C55E), Color(0xFF3B82F6))
-                                                        1 -> listOf(Color(0xFFF43F5E), Color(0xFFFBBF24))
-                                                        2 -> listOf(Color(0xFFFB923C), Color(0xFFF472B6), Color(0xFF38BDF8))
-                                                        3 -> listOf(Color(0xFF34D399), Color(0xFF2563EB))
-                                                        4 -> listOf(Color(0xFFF5D0FE), Color(0xFF93C5FD))
-                                                        5 -> listOf(Color(0xFF0F172A), Color(0xFF7DD3FC))
-                                                        6 -> listOf(Color(0xFFFF007F), Color(0xFFFF758C), Color(0xFFFF7EB3))
-                                                        7 -> listOf(Color(0xFF651FFF), Color(0xFF00E5FF))
-                                                        8 -> listOf(Color(0xFFFF9100), Color(0xFFFFEA00))
-                                                        9 -> listOf(Color(0xFF00E676), Color(0xFF1DE9B6))
-                                                        10 -> listOf(Color(0xFFF50057), Color(0xFFFF4081))
-                                                        11 -> listOf(Color(0xFF3D5AFE), Color(0xFF2F80ED))
-                                                        12 -> listOf(Color(0xFFFF3D00), Color(0xFFFF9100))
-                                                        13 -> listOf(Color(0xFF1A237E), Color(0xFF3949AB))
-                                                        14 -> listOf(Color(0xFF004D40), Color(0xFF00897B))
-                                                        15 -> listOf(Color(0xFFB71C1C), Color(0xFFD32F2F))
-                                                        16 -> listOf(Color(0xFF4A148C), Color(0xFF7B1FA2))
-                                                        17 -> listOf(Color(0xFF880E4F), Color(0xFFC2185B))
-                                                        18 -> listOf(Color(0xFF0D47A1), Color(0xFF1976D2))
-                                                        else -> emptyList()
-                                                    }
+                                                    canvasBgGradientColors = gradientColorSets[gIndex]
                                                     selectedBackgroundPhoto = null
                                                     backgroundFade = 0f
                                                 }
@@ -988,7 +1084,7 @@ fun CollageEditorScreen(
                                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text("Draw & Brush", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                Text("Draw & Brush", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1003,16 +1099,16 @@ fun CollageEditorScreen(
                                             label = { Text(type) }
                                         )
                                     }
-                                    Button(onClick = { if (drawStrokes.isNotEmpty()) drawStrokes = drawStrokes.dropLast(1) }) {
+                                    TextButton(onClick = { if (drawStrokes.isNotEmpty()) drawStrokes = drawStrokes.dropLast(1) }) {
                                         Text("Undo")
                                     }
-                                    Button(onClick = { drawStrokes = emptyList() }) {
+                                    TextButton(onClick = { drawStrokes = emptyList() }) {
                                         Text("Clear")
                                     }
                                 }
 
                                 Column(modifier = Modifier.fillMaxWidth()) {
-                                    Text("Density: ${brushDensity.toInt()}%", fontSize = 11.sp, color = Color(0xFF334155))
+                                    Text("Brush size: ${brushDensity.toInt()}%", fontSize = 11.sp, color = Color(0xFF334155))
                                     Spacer(modifier = Modifier.height(2.dp))
                                     FluidSlider(
                                         value = brushDensity,
@@ -1070,18 +1166,24 @@ fun CollageEditorScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val tools = listOf(
-                        Triple(EditorTool.RATIO, "Ratio", Icons.Default.Crop),
-                        Triple(EditorTool.LAYOUT, "Layout", Icons.Default.GridView),
-                        Triple(EditorTool.BORDER, "Border", Icons.Default.Dashboard),
-                        Triple(EditorTool.FILTER, "Filter", Icons.Default.Star),
-                        Triple(EditorTool.STICKERS, "Stickers", Icons.Default.EmojiEmotions),
-                        Triple(EditorTool.ADJUST, "Adjust", Icons.Default.Tune),
-                        // Triple(EditorTool.GLITTER, "Glitter", Icons.Default.AutoAwesome),
-                        Triple(EditorTool.TEXT, "Text", null),
-                        Triple(EditorTool.BACKGROUND, "Background", Icons.Default.Wallpaper),
-                        Triple(EditorTool.DRAW, "Draw", Icons.Default.Edit)
-                    )
+                    val tools = remember(selectedPhotos.size) {
+                        val baseTools = listOf(
+                            Triple(EditorTool.RATIO, "Ratio", Icons.Default.Crop),
+                            Triple(EditorTool.LAYOUT, "Layout", Icons.Default.GridView),
+                            Triple(EditorTool.BORDER, "Border", Icons.Default.Dashboard),
+                            Triple(EditorTool.FILTER, "Filter", Icons.Default.Star),
+                            Triple(EditorTool.STICKERS, "Stickers", Icons.Default.EmojiEmotions),
+                            Triple(EditorTool.ADJUST, "Adjust", Icons.Default.Tune),
+                            Triple(EditorTool.TEXT, "Text", null),
+                            Triple(EditorTool.BACKGROUND, "Background", Icons.Default.Wallpaper),
+                            Triple(EditorTool.DRAW, "Draw", Icons.Default.Edit)
+                        )
+                        if (selectedPhotos.size <= 1) {
+                            baseTools.filter { it.first != EditorTool.LAYOUT }
+                        } else {
+                            baseTools
+                        }
+                    }
 
                     tools.forEach { (tool, label, icon) ->
                         val isSelected = selectedTab == tool
@@ -1141,14 +1243,15 @@ fun CollageEditorScreen(
                 modifier = Modifier
                     .fillMaxWidth(0.85f)
                     .aspectRatio(aspectRatio.widthRatio / aspectRatio.heightRatio)
-                    .clip(RoundedCornerShape(borderSettings.cornerRadius.dp))
+                    .clipToBounds()
                     .then(bgModifier)
                     .onGloballyPositioned { coordinates ->
                         canvasSizePx = coordinates.size
                     }
-                    .pointerInput(selectedTab, selectedBrushType, brushColor, brushDensity) {
+                    .pointerInput(selectedTab, selectedBrushType, brushColor, brushDensity, brushOpacity, refUnitPx) {
                         if (selectedTab == EditorTool.DRAW)
                         {
+                            val eraserR = 0.04f * size.width
                             detectDragGestures(
                                 onDragStart = { offset ->
                                     currentStrokePoints = listOf(offset)
@@ -1157,7 +1260,7 @@ fun CollageEditorScreen(
                                             stroke.points.none { sp ->
                                                 val dx = sp.x - offset.x
                                                 val dy = sp.y - offset.y
-                                                (dx * dx + dy * dy) < (40f * 40f)
+                                                (dx * dx + dy * dy) < (eraserR * eraserR)
                                             }
                                         }
                                     }
@@ -1170,7 +1273,7 @@ fun CollageEditorScreen(
                                             stroke.points.none { sp ->
                                                 val dx = sp.x - ep.x
                                                 val dy = sp.y - ep.y
-                                                (dx * dx + dy * dy) < (40f * 40f)
+                                                (dx * dx + dy * dy) < (eraserR * eraserR)
                                             }
                                         }
                                     }
@@ -1179,10 +1282,11 @@ fun CollageEditorScreen(
                                     if (currentStrokePoints.isNotEmpty()) {
                                         val isEraser = selectedBrushType == "Eraser"
                                         if (!isEraser) {
-                                            val strokeWidth = 6f * (brushDensity / 50f)
+                                            val strokeWidth = OverlayMetrics.BRUSH_BASE * (brushDensity / 50f) * refUnitPx
                                             drawStrokes = drawStrokes + DrawStroke(
                                                 points = currentStrokePoints,
-                                                color = brushColor,
+                                                // opacity is baked in so preview == export per stroke
+                                                color = brushColor.copy(alpha = brushColor.alpha * brushOpacity / 100f),
                                                 strokeWidth = strokeWidth,
                                                 isEraser = false
                                             )
@@ -1230,6 +1334,7 @@ fun CollageEditorScreen(
                         selectedSlotIndex = selectedSlotIndex,
                         onSelectSlot = { selectedSlotIndex = it },
                         onSlotsChanged = { currentSlots = it },
+                        canvasWidthPx = canvasSizePx.width.toFloat(),
                         photoTransforms = photoTransforms,
                         onPhotoTransformChanged = { idx, trans ->
                             photoTransforms = photoTransforms + (idx to trans)
@@ -1251,7 +1356,6 @@ fun CollageEditorScreen(
                             drawPath(
                                 path = path,
                                 color = stroke.color,
-                                alpha = brushOpacity / 100f,
                                 style = Stroke(
                                     width = stroke.strokeWidth,
                                     cap = StrokeCap.Round,
@@ -1267,11 +1371,10 @@ fun CollageEditorScreen(
                                 lineTo(currentStrokePoints[i].x, currentStrokePoints[i].y)
                             }
                         }
-                        val strokeWidth = 6f * (brushDensity / 50f)
+                        val strokeWidth = OverlayMetrics.BRUSH_BASE * (brushDensity / 50f) * refUnitPx
                         drawPath(
                             path = path,
-                            color = brushColor,
-                            alpha = brushOpacity / 100f,
+                            color = brushColor.copy(alpha = brushColor.alpha * brushOpacity / 100f),
                             style = Stroke(
                                 width = strokeWidth,
                                 cap = StrokeCap.Round,
@@ -1325,30 +1428,23 @@ fun CollageEditorScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
-                                .padding(8.dp)
+                                .background(Color.Black.copy(alpha = OverlayMetrics.PILL_ALPHA), RoundedCornerShape(refDp(OverlayMetrics.PILL_RADIUS)))
+                                .padding(refDp(OverlayMetrics.PILL_PAD))
                         ) {
                             when (item) {
                                 is OverlayItem.Emoji -> {
-                                    Text(text = item.emoji, fontSize = 36.sp)
+                                    Text(text = item.emoji, fontSize = refSp(OverlayMetrics.EMOJI_FONT))
                                 }
                                 is OverlayItem.Photo -> {
                                     AsyncImage(
                                         model = item.uri,
                                         contentDescription = null,
                                         contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(80.dp).clip(RoundedCornerShape(6.dp))
+                                        modifier = Modifier.size(refDp(OverlayMetrics.PHOTO_SIZE)).clip(RoundedCornerShape(refDp(OverlayMetrics.PHOTO_RADIUS)))
                                     )
                                 }
                                 is OverlayItem.Text -> {
-                                    val fontStyle = when (item.font) {
-                                        "Script" -> TextStyle(fontStyle = FontStyle.Italic, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = item.textColor)
-                                        "Bold" -> TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 32.sp, color = item.textColor)
-                                        "Retro" -> TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 26.sp, color = item.textColor)
-                                        "Serif" -> TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp, color = item.textColor)
-                                        "Neon" -> TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 30.sp, color = item.textColor, shadow = Shadow(color = item.textColor, blurRadius = 16f))
-                                        else -> TextStyle(fontWeight = FontWeight.Medium, fontSize = 26.sp, color = item.textColor)
-                                    }
+                                    val fontStyle = overlayTextStyle(item.font, item.textColor)
                                     Text(text = item.text, style = fontStyle)
                                 }
                             }
@@ -1483,10 +1579,11 @@ fun CollageEditorScreen(
         }
 
         if (showAddTextDialog) {
-            var tempText by remember { mutableStateOf(collageText) }
+            val editingItem = overlayItems.firstOrNull { it.id == editingTextId } as? OverlayItem.Text
+            var tempText by remember(editingTextId) { mutableStateOf(editingItem?.text ?: "") }
             AlertDialog(
-                onDismissRequest = { showAddTextDialog = false },
-                title = { Text("Add / Edit Text") },
+                onDismissRequest = { showAddTextDialog = false; editingTextId = null },
+                title = { Text(if (editingItem != null) "Edit Text" else "Add Text") },
                 text = {
                     OutlinedTextField(
                         value = tempText,
@@ -1497,24 +1594,33 @@ fun CollageEditorScreen(
                 },
                 confirmButton = {
                     Button(onClick = {
-                        collageText = tempText
                         if (tempText.isNotBlank()) {
-                            val textOverlay = OverlayItem.Text(
-                                id = "text_${kotlin.random.Random.nextLong().toULong()}",
-                                text = tempText,
-                                font = selectedFont,
-                                textColor = textColor,
-                                offset = textOffset
-                            )
-                            overlayItems = overlayItems + textOverlay
+                            if (editingItem != null) {
+                                overlayItems = overlayItems.map {
+                                    if (it.id == editingItem.id && it is OverlayItem.Text) it.copy(text = tempText) else it
+                                }
+                            } else {
+                                // Text is a regular movable overlay (z-ordered with stickers) and is
+                                // exported with its real font, colour and size ratio.
+                                val textOverlay = OverlayItem.Text(
+                                    id = "text_${kotlin.random.Random.nextLong().toULong()}",
+                                    text = tempText,
+                                    font = selectedFont,
+                                    textColor = textColor,
+                                    offset = Offset.Zero
+                                )
+                                overlayItems = overlayItems + textOverlay
+                                selectedOverlayId = textOverlay.id
+                            }
                         }
                         showAddTextDialog = false
+                        editingTextId = null
                     }) {
                         Text("Apply")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showAddTextDialog = false }) {
+                    TextButton(onClick = { showAddTextDialog = false; editingTextId = null }) {
                         Text("Cancel")
                     }
                 }
@@ -1522,18 +1628,19 @@ fun CollageEditorScreen(
         }
 
         if (showExportDialog) {
-            val density = androidx.compose.ui.platform.LocalDensity.current
+            val density = uiDensity
             val canvasWidthDp = if (canvasSizePx.width > 0) with(density) { canvasSizePx.width.toDp().value } else 320f
             val currentCanvasW = if (canvasSizePx.width > 0) canvasSizePx.width.toFloat() else 1000f
             val currentCanvasH = if (canvasSizePx.height > 0) canvasSizePx.height.toFloat() else 1000f
 
-            val textSizeSp = when (selectedFont) { "Bold" -> 32f; "Retro" -> 26f; "Neon" -> 30f; else -> 28f }
-            val textSizePx = with(density) { textSizeSp.sp.toPx() }
+            val legacyTextRatio = OverlayMetrics.textFontRatio(selectedFont)
 
             val project = CollageProject(
                 layoutId = currentLayoutId,
                 slots = currentSlots,
-                photos = selectedPhotos.mapIndexed { i, uri ->
+                // one entry per SLOT, same fallback as the preview (slot i -> photo i, else first photo)
+                photos = currentSlots.indices.map { i ->
+                    val uri = selectedPhotos.getOrElse(i) { selectedPhotos.firstOrNull() ?: "" }
                     photoTransforms[i]?.copy(uri = uri) ?: PhotoTransform(uri = uri)
                 },
                 aspectRatioWidth = aspectRatio.widthRatio,
@@ -1548,7 +1655,7 @@ fun CollageEditorScreen(
                 filterPreset = selectedPreset,
                 filterIntensity = filterIntensity,
                 adjustValues = adjustValues,
-                overlays = overlayItems.map { item ->
+                overlays = overlayItems.withIndex().mapNotNull { (idx, item) ->
                     val nx = (currentCanvasW / 2f + item.offset.x) / currentCanvasW
                     val ny = (currentCanvasH / 2f + item.offset.y) / currentCanvasH
                     when (item) {
@@ -1558,7 +1665,8 @@ fun CollageEditorScreen(
                             x = nx,
                             y = ny,
                             rotation = item.rotation,
-                            scale = item.scale
+                            scale = item.scale,
+                            zIndex = idx.toFloat()
                         )
                         is OverlayItem.Photo -> ProjectOverlayItem.Photo(
                             id = item.id,
@@ -1566,28 +1674,39 @@ fun CollageEditorScreen(
                             x = nx,
                             y = ny,
                             rotation = item.rotation,
-                            scale = item.scale
+                            scale = item.scale,
+                            zIndex = idx.toFloat()
                         )
-                        is OverlayItem.Text -> ProjectOverlayItem.Emoji(
-                            id = item.id,
-                            emoji = item.text,
-                            x = nx,
-                            y = ny,
-                            rotation = item.rotation,
-                            scale = item.scale
-                        )
+                        is OverlayItem.Text -> null // exported as a ProjectTextLayer below
                     }
                 },
-                textLayers = if (collageText.isNotBlank()) listOf(
+                textLayers = overlayItems.withIndex().mapNotNull { (idx, item) ->
+                    (item as? OverlayItem.Text)?.let {
+                        ProjectTextLayer(
+                            id = it.id,
+                            text = it.text,
+                            x = (currentCanvasW / 2f + it.offset.x) / currentCanvasW,
+                            y = (currentCanvasH / 2f + it.offset.y) / currentCanvasH,
+                            fontName = it.font,
+                            colorLong = it.textColor.toArgb().toLong(),
+                            fontSizeRatio = OverlayMetrics.textFontRatio(it.font),
+                            rotation = it.rotation,
+                            scale = it.scale,
+                            compact = true,
+                            zIndex = idx.toFloat()
+                        )
+                    }
+                } + (if (collageText.isNotBlank()) listOf(
                     ProjectTextLayer(
                         text = collageText,
                         x = (currentCanvasW / 2f + textOffset.x) / currentCanvasW,
                         y = (currentCanvasH / 2f + textOffset.y) / currentCanvasH,
                         fontName = selectedFont,
                         colorLong = textColor.toArgb().toLong(),
-                        fontSizeRatio = textSizePx / currentCanvasW
+                        fontSizeRatio = legacyTextRatio,
+                        zIndex = 1000f
                     )
-                ) else emptyList(),
+                ) else emptyList()),
                 drawStrokes = drawStrokes.map { stroke ->
                     NormalizedDrawStroke(
                         points = stroke.points.map { pt ->
@@ -1596,9 +1715,7 @@ fun CollageEditorScreen(
                                 y = pt.y / currentCanvasH
                             )
                         },
-                        colorLong = stroke.color
-                            .copy(alpha = stroke.color.alpha * brushOpacity / 100f)
-                            .toArgb().toLong(),
+                        colorLong = stroke.color.toArgb().toLong(), // opacity already baked in
                         strokeWidthRatio = stroke.strokeWidth / currentCanvasW,
                         isEraser = stroke.isEraser
                     )

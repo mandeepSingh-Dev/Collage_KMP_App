@@ -41,8 +41,11 @@ fun HomeScreen(
     }
 
     val galleryPicker = rememberGalleryPicker { selectedUris ->
-        if (selectedUris.size <= 1) {
-            errorMessage = "Validation Error: Please select more than 1 image (at least 2 images required to create a collage)."
+        if (selectedUris.isEmpty()) {
+            errorMessage = "Validation Error: Please select at least 1 image."
+        } else if (selectedUris.size == 1) {
+            errorMessage = null
+            onNavigate(Screen.Editor(layoutId = "l1_full", selectedPhotos = selectedUris))
         } else {
             errorMessage = null
             onNavigate(Screen.LayoutSelection(selectedUris))
@@ -75,6 +78,24 @@ fun HomeScreen(
         } else {
             errorMessage = null
             onNavigate(Screen.RemoveBackground(uri))
+        }
+    }
+
+    // Templates: tap a template -> pick photos -> editor opens with the template applied
+    var pendingTemplate by remember { mutableStateOf<com.oem.collagekmpapp.data.TemplateItem?>(null) }
+    val templatePicker = rememberGalleryPicker { selectedUris ->
+        val template = pendingTemplate
+        if (template == null || selectedUris.isEmpty()) {
+            errorMessage = "Validation Error: Please select at least 1 image to use a template."
+        } else {
+            errorMessage = null
+            onNavigate(
+                Screen.Editor(
+                    layoutId = template.layoutIdFor(selectedUris.size),
+                    selectedPhotos = selectedUris,
+                    templateId = template.id
+                )
+            )
         }
     }
 
@@ -204,6 +225,16 @@ fun HomeScreen(
                     backgroundColor = Color(0xFFFEE2E2),
                     icon = Icons.Default.Folder,
                     onClick = { onNavigate(Screen.Creations) }
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Templates: themed collages (Christmas, New Year, Birthday, Love, Story, Polaroid)
+                TemplatesSection(
+                    onTemplateClick = { template ->
+                        pendingTemplate = template
+                        templatePicker.launch()
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(28.dp))

@@ -1,6 +1,7 @@
 package com.oem.collagekmpapp.ui
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,7 +20,20 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.oem.collagekmpapp.AppSettings
+import com.oem.collagekmpapp.NeuButton
+import com.oem.collagekmpapp.NeuCard
+import com.oem.collagekmpapp.NeuIconBadge
+import com.oem.collagekmpapp.NeuSwitch
+import com.oem.collagekmpapp.NeuTopBar
+import com.oem.collagekmpapp.formatBytes
 import com.oem.collagekmpapp.model.Screen
+import com.oem.collagekmpapp.neumorphic
+import com.oem.collagekmpapp.neumorphicInset
+import com.oem.collagekmpapp.rememberCacheManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,14 +44,19 @@ fun SettingsScreen(
 ) {
     val scrollState = rememberScrollState()
 
-    // Settings states
-    var selectedResolution by remember { mutableStateOf(DEFAULT_RESOLUTION) }
-    var selectedLanguage by remember { mutableStateOf(DEFAULT_LANGUAGE) }
-    var exportFormat by remember { mutableStateOf(DEFAULT_FORMAT) }
-    var imageQuality by remember { mutableFloatStateOf(90f) }
-    var watermarkEnabled by remember { mutableStateOf(false) }
-    var themeMode by remember { mutableStateOf(DEFAULT_THEME) }
-    var cacheSize by remember { mutableStateOf("14.2 MB") }
+    // Settings states -> GLOBAL (AppSettings is persisted and read by every export screen)
+    val selectedResolution = AppSettings.resolution
+    val selectedLanguage = AppSettings.language
+    val exportFormat = AppSettings.exportFormat
+    val imageQuality = AppSettings.imageQuality
+    val watermarkEnabled = AppSettings.watermark
+    val themeMode = AppSettings.theme
+
+    // Real cache size / clearing
+    val cacheManager = rememberCacheManager()
+    val scope = rememberCoroutineScope()
+    var cacheBytes by remember { mutableStateOf(0L) }
+    val cacheSize = formatBytes(cacheBytes)
     var showClearedSnackbar by remember { mutableStateOf(false) }
 
     // Bottom sheets state
@@ -50,26 +69,28 @@ fun SettingsScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // measure the real cache size when the screen opens
+    LaunchedEffect(Unit) {
+        cacheBytes = withContext(Dispatchers.Default) { cacheManager.sizeBytes() }
+    }
+
     LaunchedEffect(showClearedSnackbar) {
         if (showClearedSnackbar) {
-            snackbarHostState.showSnackbar("Cache cleared successfully (${cacheSize})")
-            cacheSize = "0 KB"
+            val freed = withContext(Dispatchers.Default) { cacheManager.clear() }
+            // re-measure so the label shows what is REALLY left (files in use may remain)
+            cacheBytes = withContext(Dispatchers.Default) { cacheManager.sizeBytes() }
+            snackbarHostState.showSnackbar("Cache cleared successfully (${formatBytes(freed)} freed)")
             showClearedSnackbar = false
         }
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color(0xFF1E293B)) },
-                navigationIcon = {
-                    IconButton(onClick = { onNavigate(Screen.Home) }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF1E293B))
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFEDF2F7))
-            )
+            Box(modifier = Modifier.background(Color(0xFFEDF2F7))) {
+                NeuTopBar(title = "Settings", onBack = { onNavigate(Screen.Home) })
+            }
         },
+        containerColor = Color(0xFFEDF2F7),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         Column(
@@ -111,7 +132,7 @@ fun SettingsScreen(
                     title = "Add Watermark",
                     subtitle = "Watermark exported creations",
                     checked = watermarkEnabled,
-                    onCheckedChange = { watermarkEnabled = it }
+                    onCheckedChange = { AppSettings.updateWatermark(it) }
                 )
             }
 
@@ -174,40 +195,27 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             // Reset to Default Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .shadow(2.dp, RoundedCornerShape(18.dp))
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color.White)
-                    .clickable {
-                        selectedResolution = DEFAULT_RESOLUTION
-                        selectedLanguage = DEFAULT_LANGUAGE
-                        exportFormat = DEFAULT_FORMAT
-                        imageQuality = 90f
-                        watermarkEnabled = false
-                        themeMode = DEFAULT_THEME
-                        onResetSavePath()
-                    }
-                    .padding(18.dp)
+            NeuButton(
+                onClick = {
+                    AppSettings.resetToDefaults()
+                    onResetSavePath()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = null,
-                        tint = Color(0xFFDC2626),
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Text(
-                        text = "Reset to Default",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFDC2626)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "Reset to Default",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFDC2626)
+                )
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -221,7 +229,7 @@ fun SettingsScreen(
             ModalBottomSheet(
                 sheetState = resolutionSheetState,
                 onDismissRequest = { showResolutionSheet = false },
-                containerColor = Color.White,
+                containerColor = Color(0xFFEDF2F7),
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(
@@ -254,7 +262,7 @@ fun SettingsScreen(
                             subtitle = subtitle,
                             selected = isSelected,
                             onClick = {
-                                selectedResolution = fullName
+                                AppSettings.updateResolution(fullName)
                                 showResolutionSheet = false
                             }
                         )
@@ -269,7 +277,7 @@ fun SettingsScreen(
         if (showFormatSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showFormatSheet = false },
-                containerColor = Color.White,
+                containerColor = Color(0xFFEDF2F7),
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
@@ -282,7 +290,7 @@ fun SettingsScreen(
                             subtitle = "Recommended format for output files",
                             selected = exportFormat == shortName,
                             onClick = {
-                                exportFormat = shortName
+                                AppSettings.updateExportFormat(shortName)
                                 showFormatSheet = false
                             }
                         )
@@ -297,7 +305,7 @@ fun SettingsScreen(
         if (showThemeSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showThemeSheet = false },
-                containerColor = Color.White,
+                containerColor = Color(0xFFEDF2F7),
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
@@ -309,7 +317,7 @@ fun SettingsScreen(
                             subtitle = "Choose app color appearance",
                             selected = themeMode == th,
                             onClick = {
-                                themeMode = th
+                                AppSettings.updateTheme(th)
                                 showThemeSheet = false
                             }
                         )
@@ -324,7 +332,7 @@ fun SettingsScreen(
         if (showLanguageSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showLanguageSheet = false },
-                containerColor = Color.White,
+                containerColor = Color(0xFFEDF2F7),
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(
@@ -380,7 +388,7 @@ fun SettingsScreen(
                                 language = lang,
                                 selected = isSelected,
                                 onClick = {
-                                    selectedLanguage = lang
+                                    AppSettings.updateLanguage(lang)
                                     showLanguageSheet = false
                                 }
                             )
@@ -407,25 +415,11 @@ fun SettingsSectionHeader(title: String) {
 
 @Composable
 fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 8.dp,
-                shape = RoundedCornerShape(20.dp),
-                ambientColor = Color(0xFFCBD5E1),
-                spotColor = Color(0xFF94A3B8)
-            )
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFFFFFFFF))
-            .border(
-                width = 1.dp,
-                brush = Brush.verticalGradient(
-                    listOf(Color.White, Color(0xFFE2E8F0))
-                ),
-                shape = RoundedCornerShape(20.dp)
-            )
-            .padding(vertical = 4.dp),
+    NeuCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        elevation = 8.dp,
+        contentPadding = PaddingValues(vertical = 4.dp),
         content = content
     )
 }
@@ -449,15 +443,7 @@ fun SettingsRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Surface(
-                color = Color(0xFFEFF6FF),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(imageVector = icon, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
-                }
-            }
+            NeuIconBadge(icon = icon, size = 38.dp)
             Text(
                 text = title,
                 fontSize = 15.sp,
@@ -507,15 +493,7 @@ fun SettingsSwitchRow(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.weight(1f)
         ) {
-            Surface(
-                color = Color(0xFFEFF6FF),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(imageVector = icon, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
-                }
-            }
+            NeuIconBadge(icon = icon, size = 38.dp)
             Column {
                 Text(
                     text = title,
@@ -533,11 +511,7 @@ fun SettingsSwitchRow(
                 }
             }
         }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF2563EB))
-        )
+        NeuSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -548,17 +522,19 @@ fun ResolutionOptionCard(
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    val shape = RoundedCornerShape(18.dp)
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) Color(0xFFEFF6FF) else Color(0xFFF8FAFC))
-            .border(
-                width = if (selected) 2.dp else 1.dp,
-                color = if (selected) Color(0xFF2563EB) else Color(0xFFE2E8F0),
-                shape = RoundedCornerShape(16.dp)
+            .then(
+                if (selected) Modifier.neumorphicInset(shape = shape)
+                else Modifier.neumorphic(shape = shape, elevation = if (pressed) 2.dp else 6.dp, pressed = pressed)
             )
-            .clickable { onClick() }
+            .then(if (selected) Modifier.border(1.5.dp, Color(0xFF2563EB), shape) else Modifier)
+            .clip(shape)
+            .clickable(interactionSource = interaction, indication = null) { onClick() }
             .padding(16.dp)
     ) {
         Row(

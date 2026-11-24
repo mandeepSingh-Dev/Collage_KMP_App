@@ -69,7 +69,14 @@ data class ProjectTextLayer(
     val colorLong: Long = 0xFFFFFFFFL,
     val fontSizeRatio: Float = 0.075f, // Relative to canvas width
     val rotation: Float = 0f,
-    val zIndex: Float = 10f
+    val zIndex: Float = 10f,
+    /** Uniform scale (pinch / handle in the editor). 1f = unscaled. */
+    val scale: Float = 1f,
+    /**
+     * true  = sticker-style text overlay (pill geometry from OverlayMetrics, exactly like the editor's text stickers).
+     * false = legacy single caption (wider 45 % pill).
+     */
+    val compact: Boolean = false
 )
 
 data class CollageProject(

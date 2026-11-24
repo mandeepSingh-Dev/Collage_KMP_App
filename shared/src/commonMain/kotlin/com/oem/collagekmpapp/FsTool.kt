@@ -63,7 +63,9 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.AdjustTools
 import com.oem.collagekmpapp.FilterPickerPanel
+import com.oem.collagekmpapp.FilteredPhoto
 import com.oem.collagekmpapp.PhotoColorEngine
+import com.oem.collagekmpapp.PhotoEffects
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.model.*
 import com.oem.collagekmpapp.rememberFreestyleExporter
@@ -226,19 +228,20 @@ private fun DrawScope.fsDrawStroke(points: List<Offset>, color: Color, widthRati
     drawPath(path, color, style = Stroke(widthPx, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
-private fun fsTextStyle(item: FreestyleItem, fontSize: androidx.compose.ui.unit.TextUnit): TextStyle {
+private fun fsTextStyle(item: FreestyleItem, fontSize: androidx.compose.ui.unit.TextUnit, canvasW: Float): TextStyle {
     val color = Color(item.colorLong.toInt())
+    // same canvas-width ratios as FreestyleRenderer.drawTextItem (was fixed px -> differed per device / export size)
     val shadow = when {
-        item.fontName == "Neon" -> Shadow(color, Offset.Zero, 16f)
-        item.textShadow -> Shadow(Color(0x99000000), Offset(3f, 3f), 6f)
+        item.fontName == "Neon" -> Shadow(color, Offset.Zero, 0.04f * canvasW)
+        item.textShadow -> Shadow(Color(0x99000000), Offset(0.006f * canvasW, 0.006f * canvasW), 0.012f * canvasW)
         else -> null
     }
     val base = when (item.fontName) {
         "Script" -> TextStyle(fontStyle = FontStyle.Italic, fontWeight = FontWeight.Bold)
-        "Bold" -> TextStyle(fontWeight = FontWeight.ExtraBold)
+        "Bold" -> TextStyle(fontWeight = FontWeight.Bold)
         "Retro" -> TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
         "Serif" -> TextStyle(fontFamily = FontFamily.Serif)
-        "Neon" -> TextStyle(fontWeight = FontWeight.ExtraBold)
+        "Neon" -> TextStyle(fontWeight = FontWeight.Bold)
         else -> TextStyle(fontWeight = FontWeight.Medium)
     }
     return base.copy(color = color, fontSize = fontSize, shadow = shadow)
@@ -308,8 +311,8 @@ private fun FsItemView(
     canvasW: Float,
     canvasH: Float,
     selected: Boolean,
-    colorFilter: ColorFilter?,
-    vignette: Float,
+    matrix: FloatArray?,
+    effects: PhotoEffects,
     onAspect: (String, Float) -> Unit
 ) {
     val density = LocalDensity.current
@@ -323,7 +326,7 @@ private fun FsItemView(
             .offset { IntOffset((item.x * canvasW - wPx / 2f).roundToInt(), (item.y * canvasH - hPx / 2f).roundToInt()) }
             .size(with(density) { wPx.toDp() }, with(density) { hPx.toDp() })
             .graphicsLayer { rotationZ = item.rotation; scaleX = item.scale; scaleY = item.scale }
-            .then(if (isPhoto && item.shadow) Modifier.shadow(6.dp, shape, clip = false) else Modifier)
+            .then(if (isPhoto && item.shadow) Modifier.shadow(with(density) { (0.02f * wPx).toDp() }, shape, clip = false) else Modifier)
             .then(if (isPhoto) Modifier.clip(shape) else Modifier)
             .then(if (isPhoto && item.frame == PhotoFrame.POLAROID) Modifier.background(Color.White) else Modifier)
     ) {
@@ -333,25 +336,16 @@ private fun FsItemView(
                 val side = if (polaroid) with(density) { (FreestyleItem.POLAROID_SIDE * wPx).toDp() } else 0.dp
                 val bottom = if (polaroid) with(density) { (FreestyleItem.POLAROID_BOTTOM * wPx).toDp() } else 0.dp
                 Box(Modifier.fillMaxSize().padding(start = side, top = side, end = side, bottom = bottom)) {
-                    AsyncImage(
-                        model = item.content,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        colorFilter = colorFilter,
-                        onSuccess = { s ->
-                            val sz = s.painter.intrinsicSize
-                            if (sz.width > 0f && sz.height > 0f) onAspect(item.id, sz.width / sz.height)
-                        },
-                        modifier = Modifier.fillMaxSize()
+                    // Same composable as the grid editor: colour matrix + blur/soften/clarity/sharpen/glow/grain/vignette,
+                    // so every Adjust/Filter result matches PhotoLook in FreestyleRenderer (it used to show colour + a rough vignette only).
+                    FilteredPhoto(
+                        uri = item.content,
+                        matrix = matrix,
+                        effects = effects,
+                        modifier = Modifier.fillMaxSize(),
+                        canvasWidthPx = canvasW,
+                        onImageAspect = { a -> onAspect(item.id, a) }
                     )
-                    if (abs(vignette) > 0.01f) {
-                        val edge = (if (vignette > 0) Color.Black else Color.White).copy(alpha = abs(vignette) * 0.9f)
-                        Box(
-                            Modifier.fillMaxSize().background(
-                                Brush.radialGradient(0.55f to Color.Transparent, 1f to edge)
-                            )
-                        )
-                    }
                 }
             }
             FreestyleItemKind.EMOJI -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -368,7 +362,7 @@ private fun FsItemView(
             ) {
                 Text(
                     item.content,
-                    style = fsTextStyle(item, with(density) { (item.fontSizeRatio * canvasW).toSp() }),
+                    style = fsTextStyle(item, with(density) { (item.fontSizeRatio * canvasW).toSp() }, canvasW),
                     maxLines = 1, softWrap = false
                 )
             }
@@ -448,12 +442,11 @@ fun FreestyleEditorScreen(
         }
     }
 
-    val photoFilter = remember(filterPreset, filterIntensity, adjustValues) {
+    val photoMatrix = remember(filterPreset, filterIntensity, adjustValues) {
         PhotoColorEngine.buildMatrix(filterPreset, filterIntensity, adjustValues)
-            ?.let { ColorFilter.colorMatrix(ColorMatrix(it)) }
     }
-    val vignette = remember(filterPreset, filterIntensity, adjustValues) {
-        PhotoColorEngine.effects(filterPreset, filterIntensity, adjustValues).vignette
+    val photoEffects = remember(filterPreset, filterIntensity, adjustValues) {
+        PhotoColorEngine.effects(filterPreset, filterIntensity, adjustValues)
     }
 
     val selected = freeItems.firstOrNull { it.id == selectedId }
@@ -946,7 +939,7 @@ fun FreestyleEditorScreen(
                         bgPhoto != null -> AsyncImage(
                             model = bgPhoto, contentDescription = null, contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
-                                .blur(with(density) { (bgBlur / 100f * 0.05f * W).toDp() }, BlurredEdgeTreatment.Unbounded)
+                                .blur(with(density) { (bgBlur / 100f * 0.05f * W).toDp() }, BlurredEdgeTreatment.Rectangle)
                         )
                         bgGradient.size >= 2 -> Box(Modifier.fillMaxSize().background(Brush.linearGradient(bgGradient.map { Color(it.toInt()) })))
                         else -> Box(Modifier.fillMaxSize().background(bgColor))
@@ -960,7 +953,7 @@ fun FreestyleEditorScreen(
                                 FsItemView(
                                     item = item, canvasW = W, canvasH = H,
                                     selected = item.id == selectedId && tool != FsTool.DRAW,
-                                    colorFilter = photoFilter, vignette = vignette,
+                                    matrix = photoMatrix, effects = photoEffects,
                                     onAspect = { id, a ->
                                         val old = freeItems.firstOrNull { it.id == id }?.aspect ?: a
                                         if (abs(old - a) > 0.01f) updateItem(id) { it.copy(aspect = a) }
@@ -1062,8 +1055,54 @@ fun FreestyleEditorScreen(
         )
     }
 
-    // =============================================================== export dialog
+    // =============================================================== unified export screen
     if (showExport) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showExport = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            val exportProject = buildProject()
+            UnifiedExportScreen(
+                previewAspect = exportProject.aspectRatioWidth / exportProject.aspectRatioHeight,
+                shareFallbackUri = exportProject.items.firstOrNull { it.kind == FreestyleItemKind.PHOTO }?.content ?: "",
+                onBack = { showExport = false },
+                onExport = { longSide, format, onResult ->
+                    selectedId = null
+                    exporter.export(buildProject(), longSide, format) { result -> onResult(result) }
+                }
+            ) {
+                // before saving: lightweight layout preview (photo positions); after saving: the real exported file
+                androidx.compose.foundation.layout.BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(androidx.compose.ui.graphics.Color(exportProject.backgroundColorLong.toInt()))
+                ) {
+                    val cw = maxWidth
+                    val ch = maxHeight
+                    exportProject.items.filter { it.kind == FreestyleItemKind.PHOTO }.forEach { it ->
+                        val iw = cw * it.widthUnits
+                        val ih = cw * it.heightUnits
+                        coil3.compose.AsyncImage(
+                            model = it.content,
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier
+                                .align(androidx.compose.ui.Alignment.TopStart)
+                                .offset(x = cw * it.x - iw / 2, y = ch * it.y - ih / 2)
+                                .size(iw, ih)
+                                .graphicsLayer(rotationZ = it.rotation, scaleX = it.scale, scaleY = it.scale)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // =============================================================== export dialog (legacy, switched off)
+    if (showExport && USE_LEGACY_EXPORT_DIALOG) {
         AlertDialog(
             onDismissRequest = { if (!isSaving) showExport = false },
             title = { Text("Save collage") },

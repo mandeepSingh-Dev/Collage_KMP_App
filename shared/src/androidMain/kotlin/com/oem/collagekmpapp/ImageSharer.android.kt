@@ -1,5 +1,7 @@
 package com.oem.collagekmpapp
 
+
+
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
@@ -262,6 +264,7 @@ actual class ImageSharer(private val context: android.content.Context) {
         val longSide = when {
             quality.contains("4K", ignoreCase = true) || quality.contains("Ultra", ignoreCase = true) -> 3840
             quality.contains("2K", ignoreCase = true) -> 2048
+            quality.contains("720", ignoreCase = true) || quality.contains("Standard", ignoreCase = true) -> 720
             else -> 1080
         }
         CoroutineScope(Dispatchers.Main).launch {

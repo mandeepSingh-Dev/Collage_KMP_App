@@ -10,9 +10,11 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.os.Build
 import com.oem.collagekmpapp.PhotoColorEngine
 import com.oem.collagekmpapp.PhotoLook
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * High-resolution renderer for Freestyle collages.
@@ -48,7 +50,7 @@ object FreestyleRenderer {
 
         val matrix = PhotoColorEngine.buildMatrix(project.filterPreset, project.filterIntensity, project.adjustValues)
         val fx = PhotoColorEngine.effects(project.filterPreset, project.filterIntensity, project.adjustValues)
-        val exportScale = (w / 1080f).coerceAtLeast(1f)
+        val exportScale = w / 1080f   // grain tile = 256px @ 1080px canvas, same ratio as the preview
 
         project.items.forEach { raw ->
             val bmp = if (raw.kind == FreestyleItemKind.PHOTO) photoBitmaps[raw.content]?.takeIf { !it.isRecycled } else null
@@ -79,19 +81,23 @@ object FreestyleRenderer {
     private fun drawBackground(canvas: Canvas, project: FreestyleProject, w: Float, h: Float, bg: Bitmap?) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         if (bg != null && !bg.isRecycled) {
-            // heavy blur = shrink hard, then scale back up with bilinear filtering
-            val src = if (project.backgroundBlur > 0.01f) {
-                val f = 1f / (1f + project.backgroundBlur * 40f)
-                Bitmap.createScaledBitmap(
-                    bg,
-                    max(2, (bg.width * f).toInt()),
-                    max(2, (bg.height * f).toInt()),
-                    true
-                )
-            } else bg
-            val s = max(w / src.width, h / src.height)
-            val bw = src.width * s
-            val bh = src.height * s
+            // Preview: Modifier.blur(backgroundBlur * 0.05 * canvasW px, clamped edges). Same radius here, with a real blur.
+            val radius = project.backgroundBlur * 0.05f * w
+            val coverScale = max(w / bg.width, h / bg.height)
+            var src = bg
+            var drawScale = coverScale
+            if (radius > 0.5f) {
+                // blur at a reduced size (fast, even for 4K), radius scaled with it
+                val k = min(1f, 1000f / w)
+                val sw = max(2, (bg.width * coverScale * k).toInt())
+                val sh = max(2, (bg.height * coverScale * k).toInt())
+                val small = Bitmap.createScaledBitmap(bg, sw, sh, true)
+                src = PhotoLook.blurBitmap(small, radius * k)
+                if (small !== bg) small.recycle()
+                drawScale = max(w / src.width, h / src.height)
+            }
+            val bw = src.width * drawScale
+            val bh = src.height * drawScale
             val dest = RectF(w / 2f - bw / 2f, h / 2f - bh / 2f, w / 2f + bw / 2f, h / 2f + bh / 2f)
             canvas.drawBitmap(src, null, dest, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
             if (src !== bg) src.recycle()
@@ -217,7 +223,8 @@ object FreestyleRenderer {
         "Serif" -> Typeface.SERIF
         "Bold", "Neon" -> Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         "Script" -> Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC)
-        else -> Typeface.DEFAULT
+        // preview uses FontWeight.Medium for "Modern"
+        else -> if (Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, 500, false) else Typeface.DEFAULT
     }
 
     private fun drawTextItem(canvas: Canvas, item: FreestyleItem, rect: RectF, canvasW: Float) {

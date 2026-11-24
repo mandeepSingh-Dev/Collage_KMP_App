@@ -10,10 +10,12 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import com.oem.collagekmpapp.OverlayMetrics
 import com.oem.collagekmpapp.PhotoColorEngine
 import com.oem.collagekmpapp.PhotoLook
 import com.oem.collagekmpapp.model.CollageProject
 import com.oem.collagekmpapp.model.ProjectOverlayItem
+import com.oem.collagekmpapp.model.ProjectTextLayer
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -24,6 +26,8 @@ import kotlin.math.max
  * produce 100% identical visuals regardless of target resolution.
  */
 object CollageRenderer {
+
+    private const val SLOT_BACKING = 0xFFCBD5E1.toInt()
 
     fun draw(
         canvas: Canvas,
@@ -45,11 +49,9 @@ object CollageRenderer {
         // 4. FREEHAND DRAW STROKES
         drawStrokes(canvas, project, w, h)
 
-        // 5. STICKERS & EMOJIS (Sorted by zIndex)
-        drawOverlays(canvas, project, w, h, photoBitmaps)
-
-        // 6. TEXT LAYERS (Sorted by zIndex)
-        drawTextLayers(canvas, project, w, h)
+        // 5. STICKERS, EMOJIS and TEXT in ONE z-ordered pass (same stacking order as the editor:
+        //    the editor keeps stickers and text overlays in a single list)
+        drawOverlayStack(canvas, project, w, h, photoBitmaps)
     }
 
     private fun drawBackground(
@@ -103,7 +105,7 @@ object CollageRenderer {
         // Same engine as the Compose preview -> what you see is what you export
         val matrix = PhotoColorEngine.buildMatrix(project.filterPreset, project.filterIntensity, project.adjustValues)
         val fx = PhotoColorEngine.effects(project.filterPreset, project.filterIntensity, project.adjustValues)
-        val exportScale = (w / 1080f).coerceAtLeast(1f)
+        val exportScale = w / 1080f   // grain tile = 256px @ 1080px canvas, same ratio as the preview
 
         project.slots.forEachIndexed { index, slot ->
             val photoTransform = project.photos.getOrNull(index)
@@ -123,6 +125,9 @@ object CollageRenderer {
 
             canvas.save()
             canvas.clipPath(clipPath)
+
+            // same slate-300 backing the editor shows behind a photo that is zoomed out below 1x
+            canvas.drawRect(rect, Paint().apply { color = SLOT_BACKING })
 
             val photoBitmap = photoBitmaps[uri]
             if (photoBitmap != null && !photoBitmap.isRecycled) {
@@ -184,133 +189,152 @@ object CollageRenderer {
         }
     }
 
-    private fun drawOverlays(
+    // ------------------------------------------------------------------ stickers + text
+
+    private fun drawOverlayStack(
         canvas: Canvas,
         project: CollageProject,
         w: Float,
         h: Float,
         photoBitmaps: Map<String, Bitmap>
     ) {
-        val sortedOverlays = project.overlays.sortedBy { it.zIndex }
-        sortedOverlays.forEach { item ->
-            val cx = item.x * w
-            val cy = item.y * h
-
-            canvas.save()
-            canvas.translate(cx, cy)
-            canvas.rotate(item.rotation)
-            canvas.scale(item.scale, item.scale)
-
-            when (item) {
-                is ProjectOverlayItem.Emoji -> {
-                    val fontSize = 0.11f * w
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = fontSize
-                        textAlign = Paint.Align.CENTER
-                        color = Color.WHITE
-                    }
-                    val textBounds = Rect()
-                    paint.getTextBounds(item.emoji, 0, item.emoji.length, textBounds)
-
-                    // Draw semi-transparent pill matching Compose preview
-                    val pillPadH = 0.035f * w
-                    val pillPadV = 0.025f * w
-                    val pillWidth = textBounds.width().toFloat() + pillPadH * 2f
-                    val pillHeight = textBounds.height().toFloat() + pillPadV * 2f
-                    val pillRect = RectF(-pillWidth / 2f, -pillHeight / 2f, pillWidth / 2f, pillHeight / 2f)
-                    val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Color.BLACK
-                        alpha = (0.35f * 255).toInt()
-                    }
-                    canvas.drawRoundRect(pillRect, 0.025f * w, 0.025f * w, pillPaint)
-
-                    // Draw emoji precisely centered at (0, 0)
-                    val yPos = -textBounds.exactCenterY()
-                    canvas.drawText(item.emoji, 0f, yPos, paint)
-                }
-
-                is ProjectOverlayItem.Photo -> {
-                    val stickerBitmap = photoBitmaps[item.uri]
-                    if (stickerBitmap != null && !stickerBitmap.isRecycled) {
-                        val size = 0.25f * w
-                        val pillPad = 0.02f * w
-                        val pillRect = RectF(-size / 2f - pillPad, -size / 2f - pillPad, size / 2f + pillPad, size / 2f + pillPad)
-                        val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = Color.BLACK
-                            alpha = (0.35f * 255).toInt()
-                        }
-                        canvas.drawRoundRect(pillRect, 0.025f * w, 0.025f * w, pillPaint)
-
-                        val photoDest = RectF(-size / 2f, -size / 2f, size / 2f, size / 2f)
-                        val photoClip = Path().apply {
-                            addRoundRect(photoDest, 0.02f * w, 0.02f * w, Path.Direction.CW)
-                        }
-                        canvas.save()
-                        canvas.clipPath(photoClip)
-                        canvas.drawBitmap(stickerBitmap, null, photoDest, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                        canvas.restore()
-                    }
-                }
+        val layers: List<Pair<Float, Any>> =
+            project.overlays.map { it.zIndex to (it as Any) } +
+                    project.textLayers.map { it.zIndex to (it as Any) }
+        layers.sortedBy { it.first }.forEach { (_, layer) ->
+            when (layer) {
+                is ProjectOverlayItem -> drawOverlay(canvas, layer, w, h, photoBitmaps)
+                is ProjectTextLayer -> drawTextLayer(canvas, layer, w, h)
             }
-            canvas.restore()
         }
     }
 
-    private fun drawTextLayers(
+    private fun refUnit(w: Float) = w / OverlayMetrics.REF_WIDTH
+
+    private fun pillPaint(alpha: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        this.alpha = (alpha * 255).toInt()
+    }
+
+    private fun drawOverlay(
         canvas: Canvas,
-        project: CollageProject,
+        item: ProjectOverlayItem,
+        w: Float,
+        h: Float,
+        photoBitmaps: Map<String, Bitmap>
+    ) {
+        val u = refUnit(w)
+        canvas.save()
+        canvas.translate(item.x * w, item.y * h)
+        canvas.rotate(item.rotation)
+        canvas.scale(item.scale, item.scale)
+
+        val pad = OverlayMetrics.PILL_PAD * u
+        val pillR = OverlayMetrics.PILL_RADIUS * u
+
+        when (item) {
+            is ProjectOverlayItem.Emoji -> {
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textSize = OverlayMetrics.EMOJI_FONT * u
+                    textAlign = Paint.Align.CENTER
+                    color = Color.WHITE
+                }
+                // pill = text line box + padding, exactly like Compose's Text inside a padded Box
+                val fm = paint.fontMetrics
+                val tw = paint.measureText(item.emoji)
+                val th = fm.descent - fm.ascent
+                val pill = RectF(-(tw / 2f + pad), -(th / 2f + pad), tw / 2f + pad, th / 2f + pad)
+                canvas.drawRoundRect(pill, pillR, pillR, pillPaint(OverlayMetrics.PILL_ALPHA))
+                canvas.drawText(item.emoji, 0f, -(fm.ascent + fm.descent) / 2f, paint)
+            }
+
+            is ProjectOverlayItem.Photo -> {
+                val bmp = photoBitmaps[item.uri]
+                if (bmp != null && !bmp.isRecycled) {
+                    val size = OverlayMetrics.PHOTO_SIZE * u
+                    val pill = RectF(-size / 2f - pad, -size / 2f - pad, size / 2f + pad, size / 2f + pad)
+                    canvas.drawRoundRect(pill, pillR, pillR, pillPaint(OverlayMetrics.PILL_ALPHA))
+
+                    val dest = RectF(-size / 2f, -size / 2f, size / 2f, size / 2f)
+                    val r = OverlayMetrics.PHOTO_RADIUS * u
+                    canvas.save()
+                    canvas.clipPath(Path().apply { addRoundRect(dest, r, r, Path.Direction.CW) })
+                    // ContentScale.Crop: fill the square, never stretch
+                    val s = max(size / bmp.width, size / bmp.height)
+                    val dw = bmp.width * s
+                    val dh = bmp.height * s
+                    canvas.drawBitmap(
+                        bmp, null, RectF(-dw / 2f, -dh / 2f, dw / 2f, dh / 2f),
+                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                    )
+                    canvas.restore()
+                }
+            }
+        }
+        canvas.restore()
+    }
+
+    /** Same weights / styles as the Compose TextStyles in the editor. */
+    private fun typefaceFor(font: String): Typeface = when (font) {
+        "Retro" -> Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        "Serif" -> Typeface.SERIF
+        "Bold", "Neon" -> Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        "Script" -> Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC)
+        else -> if (android.os.Build.VERSION.SDK_INT >= 28)
+            Typeface.create(Typeface.DEFAULT, 500, false)   // "Modern" = Medium, upright
+        else Typeface.DEFAULT
+    }
+
+    private fun drawTextLayer(
+        canvas: Canvas,
+        textLayer: ProjectTextLayer,
         w: Float,
         h: Float
     ) {
-        val sortedText = project.textLayers.sortedBy { it.zIndex }
-        sortedText.forEach { textLayer ->
-            if (textLayer.text.isBlank()) return@forEach
+        if (textLayer.text.isBlank()) return
+        val u = refUnit(w)
 
-            val cx = textLayer.x * w
-            val cy = textLayer.y * h
-
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = textLayer.colorLong.toInt()
-                textSize = textLayer.fontSizeRatio * w
-                textAlign = Paint.Align.CENTER
-                typeface = when (textLayer.fontName) {
-                    "Retro" -> Typeface.MONOSPACE
-                    "Serif" -> Typeface.SERIF
-                    "Bold", "Neon" -> Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    else -> Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
-                }
-                if (textLayer.fontName == "Neon") {
-                    setShadowLayer(0.04f * w, 0f, 0f, textLayer.colorLong.toInt())
-                }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = textLayer.colorLong.toInt()
+            textSize = textLayer.fontSizeRatio * w
+            textAlign = Paint.Align.CENTER
+            typeface = typefaceFor(textLayer.fontName)
+            if (textLayer.fontName == "Neon") {
+                setShadowLayer(
+                    if (textLayer.compact) OverlayMetrics.NEON_BLUR * u else 0.04f * w,
+                    0f, 0f, textLayer.colorLong.toInt()
+                )
             }
-
-            val textBounds = Rect()
-            paint.getTextBounds(textLayer.text, 0, textLayer.text.length, textBounds)
-
-            val hPad = 0.05f * w
-            val vPad = 0.025f * w
-            val pillWidth = textBounds.width().toFloat() + hPad * 2f
-            val pillHeight = textBounds.height().toFloat() + vPad * 2f
-
-            canvas.save()
-            canvas.translate(cx, cy)
-            if (textLayer.rotation != 0f) {
-                canvas.rotate(textLayer.rotation)
-            }
-
-            // Draw dark rounded background pill matching Compose preview
-            val pillRect = RectF(-pillWidth / 2f, -pillHeight / 2f, pillWidth / 2f, pillHeight / 2f)
-            val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.BLACK
-                alpha = (0.45f * 255).toInt()
-            }
-            canvas.drawRoundRect(pillRect, 0.015f * w, 0.015f * w, pillPaint)
-
-            // Draw text precisely centered
-            val yPos = -textBounds.exactCenterY()
-            canvas.drawText(textLayer.text, 0f, yPos, paint)
-
-            canvas.restore()
         }
+
+        val fm = paint.fontMetrics
+        val tw = paint.measureText(textLayer.text)
+        val th = fm.descent - fm.ascent
+
+        val hPad: Float
+        val vPad: Float
+        val radius: Float
+        val alpha: Float
+        if (textLayer.compact) {
+            hPad = OverlayMetrics.PILL_PAD * u
+            vPad = OverlayMetrics.PILL_PAD * u
+            radius = OverlayMetrics.PILL_RADIUS * u
+            alpha = OverlayMetrics.PILL_ALPHA
+        } else {
+            hPad = 0.05f * w
+            vPad = 0.025f * w
+            radius = 0.015f * w
+            alpha = 0.45f
+        }
+
+        canvas.save()
+        canvas.translate(textLayer.x * w, textLayer.y * h)
+        if (textLayer.rotation != 0f) canvas.rotate(textLayer.rotation)
+        if (textLayer.scale != 1f) canvas.scale(textLayer.scale, textLayer.scale)
+
+        val pill = RectF(-(tw / 2f + hPad), -(th / 2f + vPad), tw / 2f + hPad, th / 2f + vPad)
+        canvas.drawRoundRect(pill, radius, radius, pillPaint(alpha))
+        canvas.drawText(textLayer.text, 0f, -(fm.ascent + fm.descent) / 2f, paint)
+        canvas.restore()
     }
 }

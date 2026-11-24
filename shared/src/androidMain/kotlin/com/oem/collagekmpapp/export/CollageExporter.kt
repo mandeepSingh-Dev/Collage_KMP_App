@@ -1,5 +1,8 @@
 package com.oem.collagekmpapp.export
 
+import com.oem.collagekmpapp.exportFormatSpec
+import com.oem.collagekmpapp.withExportWatermark
+
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -29,10 +32,14 @@ object CollageExporter {
         longSideTarget: Int = 2048,
         format: String = "JPG"
     ): Result<Uri> = withContext(Dispatchers.IO) {
-        val candidateSizes = listOf(longSideTarget, 1440, 1080, 720)
+        // never retry at a LARGER size than requested (1080p used to fall back to 1440 on OOM)
+        val candidateSizes = listOf(longSideTarget, 2048, 1440, 1080, 720).filter { it <= longSideTarget }.distinct()
         var lastError: Throwable? = null
 
         for (targetLong in candidateSizes) {
+            val loadedBitmaps = mutableMapOf<String, Bitmap>()
+            var bgBitmap: Bitmap? = null
+            var offscreenBitmap: Bitmap? = null
             try {
                 val ratioW = project.aspectRatioWidth.coerceAtLeast(0.1f)
                 val ratioH = project.aspectRatioHeight.coerceAtLeast(0.1f)
@@ -48,7 +55,6 @@ object CollageExporter {
                 }
 
                 // 1. Decode original photos with inSampleSize and EXIF orientation
-                val loadedBitmaps = mutableMapOf<String, Bitmap>()
                 val uniqueUris = (project.photos.map { it.uri } + project.overlays.mapNotNull {
                     (it as? com.oem.collagekmpapp.model.ProjectOverlayItem.Photo)?.uri
                 }).distinct()
@@ -59,12 +65,12 @@ object CollageExporter {
                     }
                 }
 
-                val bgBitmap = project.backgroundPhotoUri?.let {
+                bgBitmap = project.backgroundPhotoUri?.let {
                     decodeSampledBitmap(context, it, exportW, exportH)
                 }
 
                 // 2. Allocate offscreen ARGB_8888 bitmap
-                val offscreenBitmap = Bitmap.createBitmap(exportW, exportH, Bitmap.Config.ARGB_8888)
+                offscreenBitmap = Bitmap.createBitmap(exportW, exportH, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(offscreenBitmap)
 
                 // 3. Render complete model via shared renderer
@@ -80,11 +86,6 @@ object CollageExporter {
                 // 4. Save to MediaStore
                 val savedUri = saveBitmapToMediaStore(context, offscreenBitmap, format)
 
-                // Cleanup bitmaps
-                offscreenBitmap.recycle()
-                loadedBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
-                bgBitmap?.let { if (!it.isRecycled) it.recycle() }
-
                 if (savedUri != null) {
                     return@withContext Result.success(savedUri)
                 } else {
@@ -97,6 +98,10 @@ object CollageExporter {
             } catch (e: Exception) {
                 lastError = e
                 break
+            } finally {
+                offscreenBitmap?.let { if (!it.isRecycled) it.recycle() }
+                loadedBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
+                bgBitmap?.let { if (!it.isRecycled) it.recycle() }
             }
         }
         Result.failure(lastError ?: IllegalStateException("Export failed."))
@@ -223,11 +228,13 @@ object CollageExporter {
         }
     }
 
-    private fun saveBitmapToMediaStore(context: Context, bitmap: Bitmap, format: String): Uri? {
-        val isPng = format.equals("PNG", ignoreCase = true)
-        val ext = if (isPng) "png" else "jpg"
-        val mime = if (isPng) "image/png" else "image/jpeg"
-        val compressFormat = if (isPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+    private fun saveBitmapToMediaStore(context: Context, rawBitmap: Bitmap, format: String): Uri? {
+        // Settings: JPG / PNG / WEBP, and the optional watermark (shared by collage + freestyle export)
+        val spec = exportFormatSpec(format)
+        val ext = spec.ext
+        val mime = spec.mime
+        val compressFormat = spec.compress
+        val bitmap = rawBitmap.withExportWatermark()
 
         val contentResolver = context.contentResolver
         val filename = "Collage_${System.currentTimeMillis()}.$ext"
@@ -242,7 +249,7 @@ object CollageExporter {
 
         val imageUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues) ?: return null
         contentResolver.openOutputStream(imageUri)?.use { output ->
-            bitmap.compress(compressFormat, 95, output)
+            bitmap.compress(compressFormat, spec.quality, output)
             output.flush()
         }
 

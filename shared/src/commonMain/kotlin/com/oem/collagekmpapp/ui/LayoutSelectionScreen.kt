@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.oem.collagekmpapp.NeuSegmented
 import com.oem.collagekmpapp.model.Screen
 
 data class LayoutOption(
@@ -48,6 +49,10 @@ fun LayoutSelectionScreen(
 
     var selectedLayout by remember(layouts) { mutableStateOf(layouts[0]) }
 
+    // "Standard Grids" <-> "Themed Templates"
+    var templateMode by remember { mutableStateOf(false) }
+    var selectedTemplate by remember { mutableStateOf<com.oem.collagekmpapp.data.TemplateItem?>(null) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -72,7 +77,14 @@ fun LayoutSelectionScreen(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = { onNavigate(Screen.Editor(selectedLayout.id, selectedPhotos)) },
+                        onClick = {
+                            val tpl = selectedTemplate
+                            if (templateMode && tpl != null) {
+                                onNavigate(Screen.Editor(tpl.layoutIdFor(selectedPhotos.size), selectedPhotos, tpl.id))
+                            } else {
+                                onNavigate(Screen.Editor(selectedLayout.id, selectedPhotos))
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
@@ -135,6 +147,15 @@ fun LayoutSelectionScreen(
         ) {
             Spacer(modifier = Modifier.height(12.dp))
 
+            NeuSegmented(
+                options = listOf("Standard Grids", "Themed Templates"),
+                selected = if (templateMode) "Themed Templates" else "Standard Grids",
+                onSelect = { templateMode = it == "Themed Templates" },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -145,17 +166,24 @@ fun LayoutSelectionScreen(
                     .background(Color.White)
                     .padding(8.dp)
             ) {
-                RenderCollageLayout(
-                    layoutId = selectedLayout.id,
-                    photos = selectedPhotos,
-                    spacing = 8.dp,
-                    cornerRadius = 16.dp,
-                    filterPreset = "Original",
-                    filterIntensity = 0f,
-                    glitterCard = "Flare 2",
-                    glitterDensity = 0f,
-                    modifier = Modifier.fillMaxSize()
-                )
+                val tplPreview = selectedTemplate
+                if (templateMode && tplPreview != null) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        TemplateLivePreview(tplPreview, selectedPhotos, Modifier.fillMaxHeight())
+                    }
+                } else {
+                    RenderCollageLayout(
+                        layoutId = selectedLayout.id,
+                        photos = selectedPhotos,
+                        spacing = 8.dp,
+                        cornerRadius = 16.dp,
+                        filterPreset = "Original",
+                        filterIntensity = 0f,
+                        glitterCard = "Flare 2",
+                        glitterDensity = 0f,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -177,7 +205,7 @@ fun LayoutSelectionScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Layouts for $count Photos",
+                            text = if (templateMode) "Themed Templates" else "Layouts for $count Photos",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF1E293B)
@@ -187,46 +215,53 @@ fun LayoutSelectionScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(layouts) { layout ->
-                            val isSelected = selectedLayout.id == layout.id
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(70.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF8FAFC))
-                                    .border(
-                                        width = if (isSelected) 2.2.dp else 1.3.dp,
-                                        color = if (isSelected) Color(0xFF2563EB) else Color(0xFF475569),
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { selectedLayout = layout }
-                                    .padding(8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        text = layout.name,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF1E293B)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = layout.description,
-                                        fontSize = 10.sp,
-                                        color = if (isSelected) Color(0xFF3B82F6) else Color(0xFF64748B)
-                                    )
+                    if (templateMode) {
+                        TemplatePicker(
+                            selectedId = selectedTemplate?.id,
+                            onSelect = { selectedTemplate = it },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(layouts) { layout ->
+                                val isSelected = selectedLayout.id == layout.id
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(70.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF8FAFC))
+                                        .border(
+                                            width = if (isSelected) 2.2.dp else 1.3.dp,
+                                            color = if (isSelected) Color(0xFF2563EB) else Color(0xFF475569),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { selectedLayout = layout }
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = layout.name,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF1E293B)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = layout.description,
+                                            fontSize = 10.sp,
+                                            color = if (isSelected) Color(0xFF3B82F6) else Color(0xFF64748B)
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
                 }
             }
         }

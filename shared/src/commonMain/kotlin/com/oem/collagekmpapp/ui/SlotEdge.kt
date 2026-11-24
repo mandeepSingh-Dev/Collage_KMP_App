@@ -1,4 +1,3 @@
-
 package com.oem.collagekmpapp.ui
 
 import androidx.compose.foundation.background
@@ -147,6 +146,70 @@ fun resizeDivider(
     }
 }
 
+/**
+ * Same behaviour as [resizeDivider], but EVERY slot that touches the dragged edge moves with it.
+ * (resizeDivider only moves the first touching neighbour, so in layouts like "1 big left + 2 stacked
+ * right" dragging the big box left a gap / overlap next to the second stacked box.)
+ * MIN_SLOT_FRACTION is enforced for the dragged box and for all of its neighbours.
+ */
+fun resizeDividerSynced(
+    startSlots: List<Slot>,
+    index: Int,
+    edge: SlotEdge,
+    deltaFraction: Float,
+    minSize: Float = MIN_SLOT_FRACTION,
+): List<Slot> {
+    val s = startSlots[index]
+    val line = s.edgeValue(edge)
+
+    val neighbors = startSlots.indices.filter { i ->
+        if (i == index) return@filter false
+        val o = startSlots[i]
+        when (edge) {
+            SlotEdge.LEFT -> abs(o.right - line) < EPS && o.top < s.bottom - EPS && o.bottom > s.top + EPS
+            SlotEdge.RIGHT -> abs(o.left - line) < EPS && o.top < s.bottom - EPS && o.bottom > s.top + EPS
+            SlotEdge.TOP -> abs(o.bottom - line) < EPS && o.left < s.right - EPS && o.right > s.left + EPS
+            SlotEdge.BOTTOM -> abs(o.top - line) < EPS && o.left < s.right - EPS && o.right > s.left + EPS
+        }
+    }
+
+    // clamp the dragged box itself
+    var d = when (edge) {
+        SlotEdge.LEFT -> (s.left + deltaFraction).coerceIn(0f, s.right - minSize) - s.left
+        SlotEdge.RIGHT -> (s.right + deltaFraction).coerceIn(s.left + minSize, 1f) - s.right
+        SlotEdge.TOP -> (s.top + deltaFraction).coerceIn(0f, s.bottom - minSize) - s.top
+        SlotEdge.BOTTOM -> (s.bottom + deltaFraction).coerceIn(s.top + minSize, 1f) - s.bottom
+    }
+    // clamp against EVERY neighbour so none of them collapses below the minimum
+    neighbors.forEach { n ->
+        val o = startSlots[n]
+        when (edge) {
+            SlotEdge.LEFT -> if (o.right + d - o.left < minSize) d = o.left + minSize - o.right
+            SlotEdge.RIGHT -> if (o.right - (o.left + d) < minSize) d = o.right - minSize - o.left
+            SlotEdge.TOP -> if (o.bottom + d - o.top < minSize) d = o.top + minSize - o.bottom
+            SlotEdge.BOTTOM -> if (o.bottom - (o.top + d) < minSize) d = o.bottom - minSize - o.top
+        }
+    }
+
+    return startSlots.mapIndexed { i, slot ->
+        when {
+            i == index -> when (edge) {
+                SlotEdge.LEFT -> slot.copy(left = slot.left + d)
+                SlotEdge.RIGHT -> slot.copy(right = slot.right + d)
+                SlotEdge.TOP -> slot.copy(top = slot.top + d)
+                SlotEdge.BOTTOM -> slot.copy(bottom = slot.bottom + d)
+            }
+            i in neighbors -> when (edge) {
+                SlotEdge.LEFT -> slot.copy(right = slot.right + d)
+                SlotEdge.RIGHT -> slot.copy(left = slot.left + d)
+                SlotEdge.TOP -> slot.copy(bottom = slot.bottom + d)
+                SlotEdge.BOTTOM -> slot.copy(top = slot.top + d)
+            }
+            else -> slot
+        }
+    }
+}
+
 /* ------------------------------------------------------------------------- */
 /*  Handle composable                                                         */
 /* ------------------------------------------------------------------------- */
@@ -196,7 +259,7 @@ fun BoxScope.ResizeHandle(
                         totalPx += if (vertical) dragAmount.x else dragAmount.y
                         if (startSlots.isNotEmpty()) {
                             latestOnChanged(
-                                resizeDivider(startSlots, index, edge, totalPx / latestSize)
+                                resizeDividerSynced(startSlots, index, edge, totalPx / latestSize)
                             )
                         }
                     },

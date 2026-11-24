@@ -36,6 +36,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -77,7 +79,11 @@ fun FilteredPhoto(
     matrix: FloatArray?,
     effects: PhotoEffects,
     modifier: Modifier = Modifier,
-    imageModifier: Modifier = Modifier
+    imageModifier: Modifier = Modifier,
+    /** Width in px of the whole collage canvas. Film grain is sized relative to it (tile = 256 px @ 1080 px canvas) so preview == export. 0 = legacy 1:1 pixels. */
+    canvasWidthPx: Float = 0f,
+    /** Reports the decoded image aspect (w/h) once loaded (used by Freestyle frames). */
+    onImageAspect: ((Float) -> Unit)? = null
 ) {
     val grade = remember(matrix) { matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     val inverted = remember(matrix) { ColorFilter.colorMatrix(ColorMatrix(PhotoColorEngine.inverted(matrix))) }
@@ -91,7 +97,8 @@ fun FilteredPhoto(
         // 1. base photo (+ real blur)
         PhotoLayer(
             uri, grade, imageModifier,
-            if (effects.blur > 0.01f) Modifier.blur(w * (EffectRadii.BLUR * effects.blur), edge) else Modifier
+            if (effects.blur > 0.01f) Modifier.blur(w * (EffectRadii.BLUR * effects.blur), edge) else Modifier,
+            onImageAspect
         )
 
         // 2. soften
@@ -123,7 +130,16 @@ fun FilteredPhoto(
         if (effects.grain > 0.01f) {
             Box(
                 Modifier.fillMaxSize().drawBehind {
-                    drawRect(brush = GrainTexture.brush, alpha = effects.grain * 0.55f, blendMode = BlendMode.Overlay)
+                    val k = if (canvasWidthPx > 0f) canvasWidthPx / 1080f else 1f   // exporter: exportScale = canvasW / 1080
+                    withTransform({ scale(k, k, Offset.Zero) }) {
+                        drawRect(
+                            brush = GrainTexture.brush,
+                            topLeft = Offset.Zero,
+                            size = Size(size.width / k, size.height / k),
+                            alpha = effects.grain * 0.55f,
+                            blendMode = BlendMode.Overlay
+                        )
+                    }
                 }
             )
         }
@@ -149,12 +165,22 @@ fun FilteredPhoto(
 }
 
 @Composable
-private fun PhotoLayer(uri: String, filter: ColorFilter?, imageModifier: Modifier, extra: Modifier) {
+private fun PhotoLayer(
+    uri: String,
+    filter: ColorFilter?,
+    imageModifier: Modifier,
+    extra: Modifier,
+    onAspect: ((Float) -> Unit)? = null
+) {
     AsyncImage(
         model = uri,
         contentDescription = null,
         contentScale = ContentScale.Crop,
         colorFilter = filter,
+        onSuccess = { s ->
+            val sz = s.painter.intrinsicSize
+            if (onAspect != null && sz.width > 0f && sz.height > 0f) onAspect(sz.width / sz.height)
+        },
         modifier = Modifier.fillMaxSize().then(imageModifier).then(extra)
     )
 }

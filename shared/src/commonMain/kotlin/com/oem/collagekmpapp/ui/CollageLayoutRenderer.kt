@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -52,11 +53,13 @@ fun RenderCollageLayout(
     selectedSlotIndex: Int? = null,
     onSelectSlot: ((Int?) -> Unit)? = null,
     onSlotsChanged: ((List<Slot>) -> Unit)? = null,
+    canvasWidthPx: Float = 0f,
     photoTransforms: Map<Int, com.oem.collagekmpapp.model.PhotoTransform>? = null,
     onPhotoTransformChanged: ((Int, com.oem.collagekmpapp.model.PhotoTransform) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
+    val density = LocalDensity.current
 
     BoxWithConstraints(modifier = modifier) {
         val safePhotos = if (photos.isEmpty()) listOf("default") else photos
@@ -86,17 +89,30 @@ fun RenderCollageLayout(
                 val offsetYDp = maxHeightDp * slot.top
                 val currentTransform = photoTransforms?.get(index)
 
+                // The photo box inside the slot (slot minus the inner-spacing padding), in PIXELS.
+                // Pan is stored as a fraction of THIS box so the exporter (which multiplies by its own
+                // box width) reproduces exactly the same shift. (It used to divide pixels by dp.)
+                val boxWidthPx = with(density) { (slotWidthDp - spacing).toPx() }.coerceAtLeast(1f)
+                val boxHeightPx = with(density) { (slotHeightDp - spacing).toPx() }.coerceAtLeast(1f)
+                // Live canvas adaptation: pan is stored as a fraction of the box, so it scales with the box
+                // while the slot is being resized; clamp so the photo can never be pushed out of a shrunken box.
+                val slotScale = currentTransform?.scale ?: 1f
+                val maxPanX = boxWidthPx * slotScale / 2f
+                val maxPanY = boxHeightPx * slotScale / 2f
+
+                val latestOnSelectSlot by rememberUpdatedState(onSelectSlot)
+
                 Box(
                     modifier = Modifier
                         .size(slotWidthDp, slotHeightDp)
                         .offset(x = offsetXDp, y = offsetYDp)
                         .padding(spacing / 2)
-                        .pointerInput(index, isDrawingMode) {
+                        .pointerInput(index, isDrawingMode, activeSlots) {
                             if (!isDrawingMode) {
                                 detectTapGestures(
                                     onTap = {
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onSelectSlot?.invoke(index)
+                                        latestOnSelectSlot?.invoke(index)
                                     }
                                 )
                             }
@@ -111,11 +127,15 @@ fun RenderCollageLayout(
                         glitterDensity = glitterDensity,
                         adjustValues = adjustValues,
                         isDrawingMode = isDrawingMode,
+                        canvasWidthPx = canvasWidthPx,
                         initialScale = currentTransform?.scale ?: 1f,
-                        initialOffset = if (currentTransform != null) Offset(currentTransform.panX * slotWidthDp.value, currentTransform.panY * slotHeightDp.value) else Offset.Zero,
+                        initialOffset = if (currentTransform != null) Offset(
+                            (currentTransform.panX * boxWidthPx).coerceIn(-maxPanX, maxPanX),
+                            (currentTransform.panY * boxHeightPx).coerceIn(-maxPanY, maxPanY)
+                        ) else Offset.Zero,
                         onTransformChanged = { newScale, newOffset ->
-                            val normPanX = if (slotWidthDp.value > 0f) newOffset.x / slotWidthDp.value else 0f
-                            val normPanY = if (slotHeightDp.value > 0f) newOffset.y / slotHeightDp.value else 0f
+                            val normPanX = newOffset.x / boxWidthPx
+                            val normPanY = newOffset.y / boxHeightPx
                             onPhotoTransformChanged?.invoke(index, com.oem.collagekmpapp.model.PhotoTransform(
                                 uri = photoUri,
                                 panX = normPanX,
@@ -126,6 +146,43 @@ fun RenderCollageLayout(
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+                }
+            }
+
+            // ---- selection border + resize handles for the selected box (drawn above every slot) ----
+            val selIdx = selectedSlotIndex
+            if (selIdx != null && selIdx in activeSlots.indices && !isDrawingMode) {
+                val sel = activeSlots[selIdx]
+                val selWidthDp = maxWidthDp * (sel.right - sel.left)
+                val selHeightDp = maxHeightDp * (sel.bottom - sel.top)
+                val layoutWidthPx = with(density) { maxWidthDp.toPx() }
+                val layoutHeightPx = with(density) { maxHeightDp.toPx() }
+                Box(
+                    modifier = Modifier
+                        .size(selWidthDp, selHeightDp)
+                        .offset(x = maxWidthDp * sel.left, y = maxHeightDp * sel.top)
+                ) {
+                    // visual selection border around the box (same inset/rounding as the photo)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(spacing / 2)
+                            .border(2.5.dp, Color(0xFF2563EB), RoundedCornerShape(cornerRadius))
+                    )
+                    // draggable handle on every interior edge (not on the collage's outer border)
+                    if (onSlotsChanged != null) {
+                        SlotEdge.entries.forEach { edge ->
+                            if (canResizeEdge(activeSlots, selIdx, edge)) {
+                                ResizeHandle(
+                                    edge = edge,
+                                    index = selIdx,
+                                    currentSlots = { activeSlots },
+                                    containerSizePx = if (edge == SlotEdge.LEFT || edge == SlotEdge.RIGHT) layoutWidthPx else layoutHeightPx,
+                                    onSlotsChanged = onSlotsChanged
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -142,6 +199,7 @@ fun CollageImageSlot(
     glitterDensity: Float,
     adjustValues: Map<String, Float> = emptyMap(),
     isDrawingMode: Boolean = false,
+    canvasWidthPx: Float = 0f,
     initialScale: Float = 1f,
     initialOffset: Offset = Offset.Zero,
     onTransformChanged: ((scale: Float, offset: Offset) -> Unit)? = null,
@@ -181,6 +239,7 @@ fun CollageImageSlot(
             matrix = matrix,
             effects = effects,
             modifier = Modifier.fillMaxSize(),
+            canvasWidthPx = canvasWidthPx,
             imageModifier = Modifier.graphicsLayer(
                 scaleX = scale,
                 scaleY = scale,

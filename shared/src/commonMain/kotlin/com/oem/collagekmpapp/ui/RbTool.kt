@@ -36,8 +36,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.BgMaskStroke
+import com.oem.collagekmpapp.USE_LEGACY_EXPORT_DIALOG
+import com.oem.collagekmpapp.UnifiedExportScreen
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberBackgroundRemovalExporter
 import kotlinx.coroutines.launch
@@ -162,6 +165,7 @@ fun RemoveBackgroundScreen(
     var cursor by remember { mutableStateOf<Offset?>(null) }                // px inside the image box
     var aspect by remember { mutableStateOf(1f) }
     var isSaving by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
 
     fun undo() {
         if (strokes.isNotEmpty()) {
@@ -194,16 +198,20 @@ fun RemoveBackgroundScreen(
                     Button(
                         enabled = !isSaving,
                         onClick = {
-                            isSaving = true
-                            exporter.export(photoUri, strokes) { result ->
-                                isSaving = false
-                                scope.launch {
-                                    snackbar.showSnackbar(
-                                        result.fold(
-                                            onSuccess = { "Saved PNG to $it" },
-                                            onFailure = { "Export failed: ${it.message ?: "unknown error"}" }
+                            if (!USE_LEGACY_EXPORT_DIALOG) {
+                                showExport = true      // -> unified Export & Share screen
+                            } else {
+                                isSaving = true
+                                exporter.export(photoUri, strokes) { result ->
+                                    isSaving = false
+                                    scope.launch {
+                                        snackbar.showSnackbar(
+                                            result.fold(
+                                                onSuccess = { "Saved PNG to $it" },
+                                                onFailure = { "Export failed: ${it.message ?: "unknown error"}" }
+                                            )
                                         )
-                                    )
+                                    }
                                 }
                             }
                         },
@@ -340,6 +348,36 @@ fun RemoveBackgroundScreen(
                             r, c, style = Stroke(2f)
                         )
                     }
+                }
+            }
+        }
+    }
+    // unified Export & Share screen (always PNG – transparent cut-out)
+    if (showExport) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showExport = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            UnifiedExportScreen(
+                previewAspect = aspect,
+                forcePng = true,
+                shareFallbackUri = photoUri,
+                onBack = { showExport = false },
+                onExport = { longSide, format, onResult ->
+                    exporter.export(photoUri, strokes) { result -> onResult(result) }
+                }
+            ) {
+                // checkerboard behind the photo, replaced by the real exported PNG after saving
+                Box(Modifier.fillMaxSize().background(Color(0xFFE2E8F0))) {
+                    AsyncImage(
+                        model = photoUri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
         }
