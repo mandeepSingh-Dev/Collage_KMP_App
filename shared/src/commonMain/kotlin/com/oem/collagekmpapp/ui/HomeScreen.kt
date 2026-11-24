@@ -51,6 +51,15 @@ fun HomeScreen(
         }
     }
 
+    val freestyleGalleryPicker = rememberGalleryPicker { selectedUris ->
+        if (selectedUris.isEmpty()) {
+            errorMessage = "Validation Error: Please select at least 1 image for Freestyle editor."
+        } else {
+            errorMessage = null
+            onNavigate(Screen.FreestyleEditor(selectedUris))
+        }
+    }
+
     Scaffold(
         snackbarHost = {
             if (errorMessage != null) {
@@ -259,6 +268,49 @@ fun HomeScreen(
                             }
                         }
                     }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Freestyle Card (Full Width)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp)
+                        .shadow(4.dp, RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0xFF8B5CF6), Color(0xFFA855F7))
+                            )
+                        )
+                        .clickable { freestyleGalleryPicker.launch() }
+                        .padding(20.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    ) {
+                        Text(
+                            text = "Freestyle Collage",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Unleash creativity with freeform layout",
+                            fontSize = 13.sp,
+                            color = Color(0xFFF3E8FF)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.Brush,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.CenterEnd)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

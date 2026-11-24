@@ -254,4 +254,63 @@ object CollageExporter {
 
         return imageUri
     }
+
+    suspend fun exportFreestyle(
+        context: Context,
+        project: com.oem.collagekmpapp.FreestyleProject,
+        longSideTarget: Int = 2048,
+        format: String = "JPG"
+    ): Result<Uri> = withContext(Dispatchers.IO) {
+        val candidateSizes = listOf(longSideTarget, 1440, 1080, 720)
+        var lastError: Throwable? = null
+
+        for (targetLong in candidateSizes) {
+            try {
+                val exportW = targetLong
+                val exportH = (targetLong * project.aspectRatioHeight / project.aspectRatioWidth).toInt().coerceAtLeast(320)
+
+                val loadedBitmaps = mutableMapOf<String, Bitmap>()
+                val uniqueUris = project.items.mapNotNull {
+                    if (it.kind == com.oem.collagekmpapp.FreestyleItemKind.PHOTO) it.content else null
+                }.distinct()
+
+                uniqueUris.forEach { uriStr ->
+                    decodeSampledBitmap(context, uriStr, exportW, exportH)?.let {
+                        loadedBitmaps[uriStr] = it
+                    }
+                }
+
+                val bgBitmap = project.backgroundPhotoUri?.let {
+                    decodeSampledBitmap(context, it, exportW, exportH)
+                }
+
+                val offscreenBitmap = com.oem.collagekmpapp.FreestyleRenderer.render(
+                    project = project,
+                    width = exportW,
+                    height = exportH,
+                    photoBitmaps = loadedBitmaps,
+                    backgroundBitmap = bgBitmap
+                )
+
+                val savedUri = saveBitmapToMediaStore(context, offscreenBitmap, format)
+
+                loadedBitmaps.values.forEach { if (!it.isRecycled) it.recycle() }
+                bgBitmap?.let { if (!it.isRecycled) it.recycle() }
+
+                if (savedUri != null) {
+                    return@withContext Result.success(savedUri)
+                } else {
+                    throw IllegalStateException("MediaStore returned null URI for saved image.")
+                }
+            } catch (oom: OutOfMemoryError) {
+                lastError = oom
+                System.gc()
+                continue
+            } catch (e: Exception) {
+                lastError = e
+                break
+            }
+        }
+        Result.failure(lastError ?: IllegalStateException("Export failed."))
+    }
 }

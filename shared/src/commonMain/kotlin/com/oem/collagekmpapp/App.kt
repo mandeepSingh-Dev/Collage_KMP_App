@@ -63,6 +63,14 @@ fun App() {
                     }
                 )
             }
+            is Screen.FreestyleEditor -> {
+                FreestyleEditorScreen(
+                    selectedPhotos = screen.selectedPhotos,
+                    onBack = {
+                        currentScreen = Screen.Home
+                    }
+                )
+            }
         }
     }
 }
