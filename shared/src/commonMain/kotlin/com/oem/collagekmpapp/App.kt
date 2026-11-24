@@ -5,6 +5,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.tooling.preview.Preview
 import com.oem.collagekmpapp.model.Screen
 import com.oem.collagekmpapp.ui.CollageEditorScreen
+import com.oem.collagekmpapp.ui.CreationsScreen
 import com.oem.collagekmpapp.ui.SavePathScreen
 import com.oem.collagekmpapp.ui.FeedbackScreen
 import com.oem.collagekmpapp.ui.HomeScreen
@@ -48,6 +49,12 @@ fun App() {
             is Screen.Feedback -> {
                 FeedbackScreen(
                     onBack = { currentScreen = Screen.Settings },
+                    onNavigate = { targetScreen -> currentScreen = targetScreen }
+                )
+            }
+            is Screen.Creations -> {
+                CreationsScreen(
+                    savePath = selectedSavePath,
                     onNavigate = { targetScreen -> currentScreen = targetScreen }
                 )
             }

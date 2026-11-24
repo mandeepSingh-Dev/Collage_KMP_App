@@ -99,27 +99,7 @@ fun HomeScreen(
             }
         },
         bottomBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp, horizontal = 32.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    BottomNavItem(icon = Icons.Default.Home, label = "Home", selected = true) {}
-                    BottomNavItem(icon = Icons.Default.GridView, label = "Creations", selected = false) {
-                        galleryPicker.launch()
-                    }
-                    BottomNavItem(icon = Icons.Default.Settings, label = "Settings", selected = false) {
-                        onNavigate(Screen.Settings)
-                    }
-                }
-            }
+            AppBottomBar(current = AppTab.Home, onNavigate = onNavigate)
         }
     ) { innerPadding ->
         AnimatedVisibility(
@@ -435,7 +415,7 @@ fun HomeScreen(
                                 colors = listOf(Color(0xFFF43F5E), Color(0xFFFB7185))
                             )
                         )
-                        .clickable { onNavigate(Screen.Home) }
+                        .clickable { onNavigate(Screen.Creations) }
                         .padding(20.dp)
                 ) {
                     Column(
