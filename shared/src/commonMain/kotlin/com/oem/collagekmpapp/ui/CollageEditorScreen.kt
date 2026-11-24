@@ -120,17 +120,19 @@ fun CollageEditorScreen(
     /** Optional themed template: its gradient, spacing, filter, text and decorations are applied up front. */
     templateId: String? = null
 ) {
+    // photos currently shown in the grid boxes (starts as the picked photos; "Replace photo" swaps entries)
+    var currentPhotos by remember(selectedPhotos) { mutableStateOf(selectedPhotos) }
     val template = remember(templateId) { com.oem.collagekmpapp.data.TemplateRepository.byId(templateId) }
-    var selectedTab by remember(selectedPhotos.size) {
-        mutableStateOf(if (selectedPhotos.size <= 1) EditorTool.RATIO else EditorTool.LAYOUT)
+    var selectedTab by remember(currentPhotos.size) {
+        mutableStateOf(if (currentPhotos.size <= 1) EditorTool.RATIO else EditorTool.LAYOUT)
     }
     var currentLayoutId by remember { mutableStateOf(layoutId) }
 
     val layoutRepo = remember { com.oem.collagekmpapp.data.LayoutRepository() }
-    val currentLayout = remember(currentLayoutId, selectedPhotos.size) {
+    val currentLayout = remember(currentLayoutId, currentPhotos.size) {
         layoutRepo.getAllLayouts().find { it.id == currentLayoutId }
-            ?: layoutRepo.getLayouts(selectedPhotos.size.coerceAtLeast(1)).firstOrNull()
-            ?: com.oem.collagekmpapp.model.CollageLayout(currentLayoutId, "Default", selectedPhotos.size, "", listOf(com.oem.collagekmpapp.model.Slot(0f, 0f, 1f, 1f)))
+            ?: layoutRepo.getLayouts(currentPhotos.size.coerceAtLeast(1)).firstOrNull()
+            ?: com.oem.collagekmpapp.model.CollageLayout(currentLayoutId, "Default", currentPhotos.size, "", listOf(com.oem.collagekmpapp.model.Slot(0f, 0f, 1f, 1f)))
     }
 
     var currentSlots by remember(currentLayoutId) { mutableStateOf(currentLayout.slots) }
@@ -274,6 +276,18 @@ fun CollageEditorScreen(
         }
     }
 
+    // Replace / swap the photo of one grid box via the device gallery
+    var replaceIndex by remember { mutableStateOf<Int?>(null) }
+    val replacePhotoPicker = rememberGalleryPicker { pickedUris ->
+        val idx = replaceIndex
+        val uri = pickedUris.firstOrNull()
+        if (idx != null && uri != null && idx in currentPhotos.indices) {
+            currentPhotos = currentPhotos.toMutableList().also { it[idx] = uri }
+            photoTransforms = photoTransforms - idx      // new picture starts with a fresh pan / zoom
+        }
+        replaceIndex = null
+    }
+
     val photoStickerPicker = rememberGalleryPicker { selectedUris ->
         if (selectedUris.isNotEmpty()) {
             val newItem = OverlayItem.Photo(
@@ -293,7 +307,7 @@ fun CollageEditorScreen(
     var exportFormat by remember { mutableStateOf("JPG") }
     var saveSuccessMessage by remember { mutableStateOf<String?>(null) }
 
-    val count = selectedPhotos.size.coerceAtLeast(2)
+    val count = currentPhotos.size.coerceAtLeast(2)
 
     val layouts = remember(count) {
         com.oem.collagekmpapp.data.LayoutRepository().getLayouts(count).map {
@@ -503,7 +517,7 @@ fun CollageEditorScreen(
                                                 .clickable {
                                                     currentLayoutId = layout.id
                                                     val newLayout = layoutRepo.getAllLayouts().find { it.id == layout.id }
-                                                        ?: layoutRepo.getLayouts(selectedPhotos.size.coerceAtLeast(1)).firstOrNull()
+                                                        ?: layoutRepo.getLayouts(currentPhotos.size.coerceAtLeast(1)).firstOrNull()
                                                     if (newLayout != null) {
                                                         currentSlots = newLayout.slots
                                                     }
@@ -562,8 +576,8 @@ fun CollageEditorScreen(
                         EditorTool.FILTER -> {
                             FilterPickerPanel(
                                 // thumbnails use the selected slot's photo, else the first photo
-                                previewUri = selectedSlotIndex?.let { selectedPhotos.getOrNull(it) }
-                                    ?: selectedPhotos.firstOrNull(),
+                                previewUri = selectedSlotIndex?.let { currentPhotos.getOrNull(it) }
+                                    ?: currentPhotos.firstOrNull(),
                                 selectedPreset = selectedPreset,
                                 intensity = filterIntensity,
                                 onPresetSelected = { preset ->
@@ -1052,7 +1066,7 @@ fun CollageEditorScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    items(selectedPhotos) { photoUri ->
+                                    items(currentPhotos) { photoUri ->
                                         val isSelected = selectedBackgroundPhoto == photoUri
                                         Box(
                                             modifier = Modifier
@@ -1166,7 +1180,7 @@ fun CollageEditorScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val tools = remember(selectedPhotos.size) {
+                    val tools = remember(currentPhotos.size) {
                         val baseTools = listOf(
                             Triple(EditorTool.RATIO, "Ratio", Icons.Default.Crop),
                             Triple(EditorTool.LAYOUT, "Layout", Icons.Default.GridView),
@@ -1178,7 +1192,7 @@ fun CollageEditorScreen(
                             Triple(EditorTool.BACKGROUND, "Background", Icons.Default.Wallpaper),
                             Triple(EditorTool.DRAW, "Draw", Icons.Default.Edit)
                         )
-                        if (selectedPhotos.size <= 1) {
+                        if (currentPhotos.size <= 1) {
                             baseTools.filter { it.first != EditorTool.LAYOUT }
                         } else {
                             baseTools
@@ -1321,7 +1335,7 @@ fun CollageEditorScreen(
                 ) {
                     RenderCollageLayout(
                         layoutId = currentLayoutId,
-                        photos = selectedPhotos,
+                        photos = currentPhotos,
                         spacing = borderSettings.spacing.dp,
                         cornerRadius = borderSettings.cornerRadius.dp,
                         filterPreset = selectedPreset,
@@ -1334,6 +1348,10 @@ fun CollageEditorScreen(
                         selectedSlotIndex = selectedSlotIndex,
                         onSelectSlot = { selectedSlotIndex = it },
                         onSlotsChanged = { currentSlots = it },
+                        onReplacePhoto = { idx ->
+                            replaceIndex = idx
+                            replacePhotoPicker.launch()
+                        },
                         canvasWidthPx = canvasSizePx.width.toFloat(),
                         photoTransforms = photoTransforms,
                         onPhotoTransformChanged = { idx, trans ->
@@ -1640,7 +1658,7 @@ fun CollageEditorScreen(
                 slots = currentSlots,
                 // one entry per SLOT, same fallback as the preview (slot i -> photo i, else first photo)
                 photos = currentSlots.indices.map { i ->
-                    val uri = selectedPhotos.getOrElse(i) { selectedPhotos.firstOrNull() ?: "" }
+                    val uri = currentPhotos.getOrElse(i) { currentPhotos.firstOrNull() ?: "" }
                     photoTransforms[i]?.copy(uri = uri) ?: PhotoTransform(uri = uri)
                 },
                 aspectRatioWidth = aspectRatio.widthRatio,
@@ -1726,7 +1744,7 @@ fun CollageEditorScreen(
                 ExportShareScreen(
                     project = project,
                     layoutId = currentLayoutId,
-                    selectedPhotos = selectedPhotos,
+                    selectedPhotos = currentPhotos,
                     slots = currentSlots,
                     spacingDp = borderSettings.spacing,
                     outerSpacingDp = borderSettings.outerSpacing,

@@ -2,6 +2,10 @@ package com.oem.collagekmpapp.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -56,6 +60,8 @@ fun RenderCollageLayout(
     canvasWidthPx: Float = 0f,
     photoTransforms: Map<Int, com.oem.collagekmpapp.model.PhotoTransform>? = null,
     onPhotoTransformChanged: ((Int, com.oem.collagekmpapp.model.PhotoTransform) -> Unit)? = null,
+    /** Tapping the round button at the top-right of the selected box asks the caller to replace that box's photo. */
+    onReplacePhoto: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
@@ -181,6 +187,30 @@ fun RenderCollageLayout(
                                     onSlotsChanged = onSlotsChanged
                                 )
                             }
+                        }
+                    }
+                    // replace / swap photo button – top-right corner of the selected box (above the handles)
+                    if (onReplacePhoto != null) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(spacing / 2 + 6.dp)
+                                .size(38.dp)
+                                .shadow(6.dp, CircleShape)
+                                .background(Color.White, CircleShape)
+                                .clip(CircleShape)
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onReplacePhoto(selIdx)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddPhotoAlternate,
+                                contentDescription = "Replace photo",
+                                tint = Color(0xFF2563EB),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
