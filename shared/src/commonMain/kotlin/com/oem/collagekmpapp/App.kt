@@ -8,7 +8,9 @@ import com.oem.collagekmpapp.ui.CollageEditorScreen
 import com.oem.collagekmpapp.ui.SavePathScreen
 import com.oem.collagekmpapp.ui.FeedbackScreen
 import com.oem.collagekmpapp.ui.HomeScreen
+import com.oem.collagekmpapp.ui.RemoveBackgroundScreen
 import com.oem.collagekmpapp.ui.SettingsScreen
+import com.oem.collagekmpapp.ui.SinglePhotoEditorScreen
 
 @Composable
 @Preview
@@ -66,6 +68,22 @@ fun App() {
             is Screen.FreestyleEditor -> {
                 FreestyleEditorScreen(
                     selectedPhotos = screen.selectedPhotos,
+                    onBack = {
+                        currentScreen = Screen.Home
+                    }
+                )
+            }
+            is Screen.EditPhoto -> {
+                SinglePhotoEditorScreen(
+                    photoUri = screen.photoUri,
+                    onBack = {
+                        currentScreen = Screen.Home
+                    }
+                )
+            }
+            is Screen.RemoveBackground -> {
+                RemoveBackgroundScreen(
+                    photoUri = screen.photoUri,
                     onBack = {
                         currentScreen = Screen.Home
                     }

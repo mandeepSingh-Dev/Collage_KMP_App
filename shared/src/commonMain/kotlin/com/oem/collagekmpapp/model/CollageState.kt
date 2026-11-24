@@ -71,4 +71,6 @@ sealed class Screen {
     data class LayoutSelection(val selectedPhotos: List<String>) : Screen()
     data class Editor(val layoutId: String, val selectedPhotos: List<String>) : Screen()
     data class FreestyleEditor(val selectedPhotos: List<String>) : Screen()
+    data class EditPhoto(val photoUri: String) : Screen()
+    data class RemoveBackground(val photoUri: String) : Screen()
 }

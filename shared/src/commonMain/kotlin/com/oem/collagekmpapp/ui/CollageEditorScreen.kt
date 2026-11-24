@@ -90,6 +90,16 @@ sealed class OverlayItem {
         override val rotation: Float = 0f,
         override val scale: Float = 1f
     ) : OverlayItem()
+
+    data class Text(
+        override val id: String,
+        val text: String,
+        val font: String = "Modern",
+        val textColor: Color = Color.White,
+        override val offset: Offset = Offset.Zero,
+        override val rotation: Float = 0f,
+        override val scale: Float = 1f
+    ) : OverlayItem()
 }
 
 data class AdjustOption(
@@ -975,15 +985,14 @@ fun CollageEditorScreen(
                         }
                         EditorTool.DRAW -> {
                             Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Text("Draw & Brush", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
-                                Text("Brush Type & Eraser", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     brushTypes.forEach { type ->
@@ -993,6 +1002,12 @@ fun CollageEditorScreen(
                                             onClick = { selectedBrushType = type },
                                             label = { Text(type) }
                                         )
+                                    }
+                                    Button(onClick = { if (drawStrokes.isNotEmpty()) drawStrokes = drawStrokes.dropLast(1) }) {
+                                        Text("Undo")
+                                    }
+                                    Button(onClick = { drawStrokes = emptyList() }) {
+                                        Text("Clear")
                                     }
                                 }
 
@@ -1290,6 +1305,7 @@ fun CollageEditorScreen(
                                                     when (it) {
                                                         is OverlayItem.Emoji -> it.copy(offset = itemOffset)
                                                         is OverlayItem.Photo -> it.copy(offset = itemOffset)
+                                                        is OverlayItem.Text -> it.copy(offset = itemOffset)
                                                     }
                                                 } else it
                                             }
@@ -1323,6 +1339,17 @@ fun CollageEditorScreen(
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.size(80.dp).clip(RoundedCornerShape(6.dp))
                                     )
+                                }
+                                is OverlayItem.Text -> {
+                                    val fontStyle = when (item.font) {
+                                        "Script" -> TextStyle(fontStyle = FontStyle.Italic, fontWeight = FontWeight.Bold, fontSize = 28.sp, color = item.textColor)
+                                        "Bold" -> TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 32.sp, color = item.textColor)
+                                        "Retro" -> TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 26.sp, color = item.textColor)
+                                        "Serif" -> TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp, color = item.textColor)
+                                        "Neon" -> TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 30.sp, color = item.textColor, shadow = Shadow(color = item.textColor, blurRadius = 16f))
+                                        else -> TextStyle(fontWeight = FontWeight.Medium, fontSize = 26.sp, color = item.textColor)
+                                    }
+                                    Text(text = item.text, style = fontStyle)
                                 }
                             }
                         }
@@ -1365,6 +1392,7 @@ fun CollageEditorScreen(
                                                 when (it) {
                                                     is OverlayItem.Emoji -> it.copy(rotation = itemRotation)
                                                     is OverlayItem.Photo -> it.copy(rotation = itemRotation)
+                                                    is OverlayItem.Text -> it.copy(rotation = itemRotation)
                                                 }
                                             } else it
                                         }
@@ -1396,6 +1424,7 @@ fun CollageEditorScreen(
                                                     when (it) {
                                                         is OverlayItem.Emoji -> it.copy(scale = itemScale)
                                                         is OverlayItem.Photo -> it.copy(scale = itemScale)
+                                                        is OverlayItem.Text -> it.copy(scale = itemScale)
                                                     }
                                                 } else it
                                             }
@@ -1469,6 +1498,16 @@ fun CollageEditorScreen(
                 confirmButton = {
                     Button(onClick = {
                         collageText = tempText
+                        if (tempText.isNotBlank()) {
+                            val textOverlay = OverlayItem.Text(
+                                id = "text_${kotlin.random.Random.nextLong().toULong()}",
+                                text = tempText,
+                                font = selectedFont,
+                                textColor = textColor,
+                                offset = textOffset
+                            )
+                            overlayItems = overlayItems + textOverlay
+                        }
                         showAddTextDialog = false
                     }) {
                         Text("Apply")
@@ -1524,6 +1563,14 @@ fun CollageEditorScreen(
                         is OverlayItem.Photo -> ProjectOverlayItem.Photo(
                             id = item.id,
                             uri = item.uri,
+                            x = nx,
+                            y = ny,
+                            rotation = item.rotation,
+                            scale = item.scale
+                        )
+                        is OverlayItem.Text -> ProjectOverlayItem.Emoji(
+                            id = item.id,
+                            emoji = item.text,
                             x = nx,
                             y = ny,
                             rotation = item.rotation,

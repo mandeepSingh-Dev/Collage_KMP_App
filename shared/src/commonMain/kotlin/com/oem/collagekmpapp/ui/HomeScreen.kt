@@ -60,6 +60,28 @@ fun HomeScreen(
         }
     }
 
+    // Single-image picker for the Edit Photo feature (only the first pick is used)
+    val editPhotoPicker = rememberGalleryPicker { selectedUris ->
+        val uri = selectedUris.firstOrNull()
+        if (uri == null) {
+            errorMessage = "Validation Error: Please select an image to edit."
+        } else {
+            errorMessage = null
+            onNavigate(Screen.EditPhoto(uri))
+        }
+    }
+
+    // Single-image picker for the Remove Background feature (only the first pick is used)
+    val removeBgPicker = rememberGalleryPicker { selectedUris ->
+        val uri = selectedUris.firstOrNull()
+        if (uri == null) {
+            errorMessage = "Validation Error: Please select an image to remove its background."
+        } else {
+            errorMessage = null
+            onNavigate(Screen.RemoveBackground(uri))
+        }
+    }
+
     Scaffold(
         snackbarHost = {
             if (errorMessage != null) {
@@ -305,6 +327,92 @@ fun HomeScreen(
                     }
                     Icon(
                         imageVector = Icons.Default.Brush,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.CenterEnd)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Edit Photo Card (Full Width) - single photo editor
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp)
+                        .shadow(4.dp, RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0xFF0D9488), Color(0xFF14B8A6))
+                            )
+                        )
+                        .clickable { editPhotoPicker.launch() }
+                        .padding(20.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    ) {
+                        Text(
+                            text = "Edit Photo",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Crop, filter, blur, draw & more",
+                            fontSize = 13.sp,
+                            color = Color(0xFFCCFBF1)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.CenterEnd)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Remove Background Card (Full Width)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp)
+                        .shadow(4.dp, RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0xFF0EA5E9), Color(0xFF6366F1))
+                            )
+                        )
+                        .clickable { removeBgPicker.launch() }
+                        .padding(20.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    ) {
+                        Text(
+                            text = "Remove Background",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Erase or restore parts of your photo",
+                            fontSize = 13.sp,
+                            color = Color(0xFFE0E7FF)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.AutoFixHigh,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier

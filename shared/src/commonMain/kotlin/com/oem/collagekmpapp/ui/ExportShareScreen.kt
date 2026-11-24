@@ -102,6 +102,7 @@ fun ExportShareScreen(
                 when (item) {
                     is OverlayItem.Emoji -> ProjectOverlayItem.Emoji(item.id, item.emoji, nx, ny, item.rotation, item.scale)
                     is OverlayItem.Photo -> ProjectOverlayItem.Photo(item.id, item.uri, nx, ny, item.rotation, item.scale)
+                    is OverlayItem.Text -> ProjectOverlayItem.Emoji(item.id, item.text, nx, ny, item.rotation, item.scale)
                 }
             },
             textLayers = if (collageText.isNotBlank()) listOf(

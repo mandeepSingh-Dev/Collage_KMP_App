@@ -157,6 +157,23 @@ actual class ImageSharer(private val context: android.content.Context) {
                             canvas.drawBitmap(sticker, null, RectF(-size / 2f, -size / 2f, size / 2f, size / 2f), Paint(Paint.ANTI_ALIAS_FLAG))
                         }
                     }
+                    is com.oem.collagekmpapp.ui.OverlayItem.Text -> {
+                        val fontStyle = when (item.font) {
+                            "Script" -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD_ITALIC)
+                            "Bold", "Neon" -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                            "Retro" -> android.graphics.Typeface.MONOSPACE
+                            "Serif" -> android.graphics.Typeface.SERIF
+                            else -> android.graphics.Typeface.DEFAULT
+                        }
+                        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = item.textColor.value.toLong().toInt()
+                            textSize = 32f * coordinateScale
+                            textAlign = Paint.Align.CENTER
+                            typeface = fontStyle
+                            if (item.font == "Neon") setShadowLayer(16f * coordinateScale, 0f, 0f, color)
+                        }
+                        canvas.drawText(item.text, 0f, paint.textSize, paint)
+                    }
                 }
                 canvas.restore()
             }
