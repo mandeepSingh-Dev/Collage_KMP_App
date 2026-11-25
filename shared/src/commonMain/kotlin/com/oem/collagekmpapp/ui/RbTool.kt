@@ -202,7 +202,7 @@ fun RemoveBackgroundScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Remove Background", fontWeight = FontWeight.Bold) },
+                title = { Text("Background Eraser", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
                     UndoRedoActions(history)
@@ -243,6 +243,14 @@ fun RemoveBackgroundScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // universal Reset: strokes, brush size / offset, preview background and tool back to their defaults
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Eraser tools", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    RbResetButton(enabled = strokes.isNotEmpty() || brushSize != 40f || brushOffset != 40f || previewBg != RbPreviewBg.CHECKER || tool != RbTool.ERASER) {
+                        strokes = emptyList(); redoStack = emptyList(); current = emptyList(); cursor = null
+                        brushSize = 40f; brushOffset = 40f; previewBg = RbPreviewBg.CHECKER; tool = RbTool.ERASER
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     RbChip("Eraser", tool == RbTool.ERASER) { tool = RbTool.ERASER }
                     RbChip("Brush (restore)", tool == RbTool.BRUSH) { tool = RbTool.BRUSH }
@@ -370,7 +378,7 @@ fun RemoveBackgroundScreen(
             onDismissRequest = { showExport = false },
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
-             )
+            )
         ) {
             UnifiedExportScreen(
                 previewAspect = aspect,
@@ -392,5 +400,23 @@ fun RemoveBackgroundScreen(
                 }
             }
         }
+    }
+}
+
+/** Prominent per-tool Reset button; enabled only while the tool has changes. */
+@Composable
+private fun RbResetButton(enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(20.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2563EB), disabledContentColor = Color(0xFFCBD5E1)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (enabled) Color(0xFF2563EB) else Color(0xFFE2E8F0)),
+        modifier = Modifier.height(30.dp)
+    ) {
+        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text("Reset", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }

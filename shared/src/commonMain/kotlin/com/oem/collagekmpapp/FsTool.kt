@@ -508,6 +508,54 @@ fun FreestyleEditorScreen(
         if (selectedId != null && snap.items.none { it.id == selectedId }) selectedId = null
     }
 
+    // ---------------------------------------------------------------- per-tool Reset
+    val defPhoto = remember { newFreestylePhoto("", 0) }
+    val defText = remember { newFreestyleText("") }
+    val selText = selected?.takeIf { it.kind == FreestyleItemKind.TEXT }
+    val toolIsDirty: Boolean = when (tool) {
+        FsTool.RATIO -> aspect != AspectRatio.SQUARE
+        FsTool.BACKGROUND -> bgGradient.isNotEmpty() || bgPhoto != null || bgBlur != 100f ||
+                bgTexture != BackgroundTexture.NONE || bgColor != Color(0xFFFFF7ED)
+        FsTool.FRAME -> freeItems.any { it.kind == FreestyleItemKind.PHOTO && (it.frame != defPhoto.frame || it.shadow != defPhoto.shadow) }
+        FsTool.TEXT -> selText != null && (selText.fontName != defText.fontName || selText.colorLong != defText.colorLong ||
+                selText.fontSizeRatio != defText.fontSizeRatio || selText.textPill != defText.textPill ||
+                selText.textShadow != defText.textShadow)
+        FsTool.STICKERS -> freeItems.any { it.kind == FreestyleItemKind.EMOJI }
+        FsTool.FILTER -> filterPreset != "Original" || filterIntensity != 0f
+        FsTool.ADJUST -> adjustValues.any { it.value != 0f }
+        FsTool.DRAW -> strokes.isNotEmpty() || eraser || brushSize != 10f || brushOpacity != 100f || brushColor != Color(0xFFF43F8E)
+    }
+    val resetTool: () -> Unit = {
+        when (tool) {
+            FsTool.RATIO -> aspect = AspectRatio.SQUARE
+            FsTool.BACKGROUND -> {
+                bgColor = Color(0xFFFFF7ED); bgGradient = emptyList(); bgPhoto = null
+                bgBlur = 100f; bgTexture = BackgroundTexture.NONE
+            }
+            FsTool.FRAME -> freeItems = freeItems.map {
+                if (it.kind == FreestyleItemKind.PHOTO) it.copy(frame = defPhoto.frame, shadow = defPhoto.shadow) else it
+            }
+            FsTool.TEXT -> selText?.let { st ->
+                updateItem(st.id) {
+                    it.copy(
+                        fontName = defText.fontName, colorLong = defText.colorLong, fontSizeRatio = defText.fontSizeRatio,
+                        textPill = defText.textPill, textShadow = defText.textShadow
+                    )
+                }
+            }
+            FsTool.STICKERS -> {
+                freeItems = freeItems.filter { it.kind != FreestyleItemKind.EMOJI }
+                if (selected?.kind == FreestyleItemKind.EMOJI) selectedId = null
+            }
+            FsTool.FILTER -> { filterPreset = "Original"; filterIntensity = 0f }
+            FsTool.ADJUST -> adjustValues = emptyMap()
+            FsTool.DRAW -> {
+                strokes = emptyList(); currentStroke = emptyList(); eraser = false
+                brushColor = Color(0xFFF43F8E); brushSize = 10f; brushOpacity = 100f
+            }
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -527,12 +575,17 @@ fun FreestyleEditorScreen(
         },
         bottomBar = {
             Column(Modifier.background(Color.White)) {
-                Box(
-                    Modifier.fillMaxWidth().height(240.dp).background(Color(0xFFF8FAFC))
+                Column(
+                    Modifier.fillMaxWidth().height(264.dp).background(Color(0xFFF8FAFC))
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
+                    // universal per-tool Reset
+                    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(tool.label, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                        FsResetButton(enabled = toolIsDirty, onClick = resetTool)
+                    }
                     Column(
-                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         when (tool) {
@@ -1183,5 +1236,23 @@ fun FreestyleEditorScreen(
             },
             dismissButton = { TextButton(enabled = !isSaving, onClick = { showExport = false }) { Text("Cancel") } }
         )
+    }
+}
+
+/** Prominent per-tool Reset button; enabled only while the tool has changes. */
+@Composable
+private fun FsResetButton(enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(20.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2563EB), disabledContentColor = Color(0xFFCBD5E1)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (enabled) Color(0xFF2563EB) else Color(0xFFE2E8F0)),
+        modifier = Modifier.height(30.dp)
+    ) {
+        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text("Reset", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }

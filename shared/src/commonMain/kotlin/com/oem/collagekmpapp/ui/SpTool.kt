@@ -1,5 +1,13 @@
 package com.oem.collagekmpapp.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +36,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -105,6 +115,8 @@ import com.oem.collagekmpapp.model.*
 import com.oem.collagekmpapp.newFreestyleEmoji
 import com.oem.collagekmpapp.newFreestyleText
 import com.oem.collagekmpapp.rememberEditHistory
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
@@ -840,6 +852,74 @@ fun SinglePhotoEditorScreen(
         if (selectedId != null && snap.overlays.none { it.id == selectedId }) selectedId = null
     }
 
+    // ---------------------------------------------------------------- per-tool Reset
+    // "dirty" = the open tool has changes; Reset puts just that tool back to its default (each step is undoable).
+    val defaultText = remember { newFreestyleText("") }
+    val selText = selected?.takeIf { it.kind == FreestyleItemKind.TEXT }
+    val toolIsDirty: Boolean = when (tool) {
+        SpTool.RESIZE, SpTool.RATIO -> ratioKey != "Original" || ratioOverride != null || !fit
+        SpTool.CROP -> crop != SpCrop() || cropShape != SpCropShape.FREE || fineAngle != 0f || quarterTurns != 0 ||
+                flipH || flipV || scaleH != 100f || scaleV != 100f || centerScale != 100f
+        SpTool.FILTER -> filterPreset != "Original" || filterIntensity != 0f
+        SpTool.ADJUST -> adjustValues.any { it.value != 0f }
+        SpTool.SELECTIVE -> tools.selective.isNotEmpty()
+        SpTool.VINTAGE -> tools.vintage != VintageState()
+        SpTool.GLAMOUR -> tools.glamour != GlamourState()
+        SpTool.BLUR -> blurOn || blurInside || blurAmount != 60f || blurFeather != 0.35f ||
+                blurCx != 0.5f || blurCy != 0.5f || blurR != 0.25f
+        SpTool.LENS -> tools.lens != LensBlurState()
+        SpTool.PERSPECTIVE -> tools.perspective != PerspectiveState()
+        SpTool.STICKERS -> overlays.any { it.kind == FreestyleItemKind.EMOJI }
+        SpTool.TEXT -> selText != null && (selText.fontName != defaultText.fontName || selText.colorLong != defaultText.colorLong ||
+                selText.fontSizeRatio != defaultText.fontSizeRatio || selText.textPill != defaultText.textPill ||
+                selText.textShadow != defaultText.textShadow)
+        SpTool.BACKGROUND -> bgGradient.isNotEmpty() || bgBlurPhoto || bgBlur != 100f ||
+                bgTexture != BackgroundTexture.NONE || bgColor != Color(0xFFFFFFFF)
+        SpTool.DRAW -> strokes.isNotEmpty() || eraser || brushSize != 10f || brushOpacity != 100f || brushColor != Color(0xFFF43F8E)
+    }
+    val resetTool: () -> Unit = {
+        when (tool) {
+            SpTool.RESIZE, SpTool.RATIO -> { ratioKey = "Original"; ratioOverride = null; fit = true }
+            SpTool.CROP -> {
+                crop = SpCrop(); cropShape = SpCropShape.FREE
+                fineAngle = 0f; quarterTurns = 0; flipH = false; flipV = false
+                scaleH = 100f; scaleV = 100f; centerScale = 100f
+            }
+            SpTool.FILTER -> { filterPreset = "Original"; filterIntensity = 0f }
+            SpTool.ADJUST -> adjustValues = emptyMap()
+            SpTool.SELECTIVE -> { tools = tools.copy(selective = emptyList()); activePointId = null }
+            SpTool.VINTAGE -> tools = tools.copy(vintage = VintageState())
+            SpTool.GLAMOUR -> tools = tools.copy(glamour = GlamourState())
+            SpTool.BLUR -> {
+                blurOn = false; blurInside = false; blurAmount = 60f; blurFeather = 0.35f
+                blurCx = 0.5f; blurCy = 0.5f; blurR = 0.25f
+            }
+            SpTool.LENS -> tools = tools.copy(lens = LensBlurState())
+            SpTool.PERSPECTIVE -> tools = tools.copy(perspective = PerspectiveState())
+            SpTool.STICKERS -> {
+                overlays = overlays.filter { it.kind != FreestyleItemKind.EMOJI }
+                if (selected?.kind == FreestyleItemKind.EMOJI) selectedId = null
+            }
+            SpTool.TEXT -> selText?.let { st ->
+                updateOverlay(st.id) {
+                    it.copy(
+                        fontName = defaultText.fontName, colorLong = defaultText.colorLong,
+                        fontSizeRatio = defaultText.fontSizeRatio, textPill = defaultText.textPill,
+                        textShadow = defaultText.textShadow
+                    )
+                }
+            }
+            SpTool.BACKGROUND -> {
+                bgColor = Color(0xFFFFFFFF); bgGradient = emptyList(); bgBlurPhoto = false
+                bgBlur = 100f; bgTexture = BackgroundTexture.NONE
+            }
+            SpTool.DRAW -> {
+                strokes = emptyList(); currentStroke = emptyList(); eraser = false
+                brushColor = Color(0xFFF43F8E); brushSize = 10f; brushOpacity = 100f
+            }
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -858,12 +938,17 @@ fun SinglePhotoEditorScreen(
         },
         bottomBar = {
             Column(Modifier.background(Color.White)) {
-                Box(
-                    Modifier.fillMaxWidth().height(240.dp).background(Color(0xFFF8FAFC))
+                Column(
+                    Modifier.fillMaxWidth().height(264.dp).background(Color(0xFFF8FAFC))
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
+                    // universal per-tool Reset
+                    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(tool.label, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                        SpResetButton(enabled = toolIsDirty, onClick = resetTool)
+                    }
                     Column(
-                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         when (tool) {
@@ -999,29 +1084,46 @@ fun SinglePhotoEditorScreen(
                             }
                             // ------------------------------------------------ 5. BLUR + OVERLAY CIRCLE
                             SpTool.BLUR -> {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Spotlight blur", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                                    Switch(checked = blurOn, onCheckedChange = { blurOn = it })
+                                SpLabel("Spotlight blur")
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SpOptionCard("Original", !blurOn, icon = Icons.Default.Block) { blurOn = false }
+                                    SpOptionCard("Keep circle sharp", blurOn && !blurInside, icon = Icons.Default.BlurOn) { blurOn = true; blurInside = false }
+                                    SpOptionCard("Blur inside circle", blurOn && blurInside, icon = Icons.Default.BlurCircular) { blurOn = true; blurInside = true }
                                 }
                                 if (blurOn) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        SpChip("Keep circle sharp", !blurInside) { blurInside = false }
-                                        SpChip("Blur inside circle", blurInside) { blurInside = true }
-                                    }
                                     SpSliderRow("Blur amount: ${blurAmount.toInt()}%", blurAmount, 5f..100f) { blurAmount = it }
                                     SpSliderRow("Circle size: ${(blurR * 100).toInt()}", blurR * 100f, 8f..70f) { blurR = it / 100f }
                                     SpSliderRow("Edge softness: ${(blurFeather * 100).toInt()}%", blurFeather * 100f, 0f..100f) { blurFeather = it / 100f }
                                     SpHint("Drag the circle to move it, pinch or use the corner handle to resize.")
                                 } else {
-                                    SpHint("Turn this on to place a circle over the photo. Everything outside it is blurred (or inside, if you flip the mode).")
+                                    SpHint("No blur is applied. Pick a style above to place a circle over the photo.")
                                 }
                             }
                             // ------------------------------------------------ 5a. SELECTIVE
                             SpTool.SELECTIVE -> {
                                 val ap = tools.selective.firstOrNull { it.id == activePointId }
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    SpChip(if (showPoints) "Hide points" else "Show points", false) { showPoints = !showPoints }
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    // eye: show / hide the control-point circles (shown by default)
+                                    Row(
+                                        Modifier.clip(RoundedCornerShape(20.dp))
+                                            .background(if (showPoints) Color(0xFF0F172A) else Color(0xFFF1F5F9))
+                                            .clickable { showPoints = !showPoints }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            if (showPoints) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = if (showPoints) "Hide control points" else "Show control points",
+                                            tint = if (showPoints) Color.White else Color(0xFF334155),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            if (showPoints) "Points shown" else "Points hidden", fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (showPoints) Color.White else Color(0xFF334155)
+                                        )
+                                    }
                                     SpChip("Delete point", false) {
                                         ap?.let { a ->
                                             tools = tools.copy(selective = tools.selective.filter { it.id != a.id })
@@ -1031,70 +1133,79 @@ fun SinglePhotoEditorScreen(
                                     SpChip("Clear all", false) { tools = tools.copy(selective = emptyList()); activePointId = null }
                                 }
                                 SpLabel("Control points: ${tools.selective.size} / $SELECTIVE_MAX_POINTS")
-                                SpHint("Tap the photo to drop a control point, then use the strip on the photo for Brightness, Contrast, Saturation and Structure. Drag a point to move it, pinch anywhere to resize the active circle. The eye hides the circles.")
+                                if (ap != null) {
+                                    // controller shown in place (no placeholder text while a point is active)
+                                    SpSelectiveControls(
+                                        point = ap, param = selParam, onParam = { selParam = it },
+                                        onValue = { v -> updatePoint(ap.id) { it.withValue(selParam, v) } }
+                                    )
+                                } else {
+                                    SpHint("Tap the photo to drop a control point. Drag a point to move it, pinch to resize its circle.")
+                                }
                             }
                             // ------------------------------------------------ 5b. VINTAGE
                             SpTool.VINTAGE -> {
                                 val v = tools.vintage
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Vintage", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                                    Switch(checked = v.on, onCheckedChange = { on -> setVintage { it.copy(on = on) } })
-                                }
-                                if (v.on) {
-                                    SpLabel("Colour tint")
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        VintageTint.entries.forEach { t ->
-                                            SpColorChip(t.label, Color(t.swatch.toInt()), v.tint == t) { setVintage { it.copy(tint = t) } }
+                                SpLabel("Vintage style")
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SpOptionCard("Original", !v.on, icon = Icons.Default.Block) { setVintage { it.copy(on = false) } }
+                                    VintageTint.entries.forEach { t ->
+                                        SpOptionCard(t.label, v.on && v.tint == t, swatch = Color(t.swatch.toInt())) {
+                                            setVintage { it.copy(on = true, tint = t) }
                                         }
                                     }
+                                }
+                                if (v.on) {
                                     SpSliderRow("Brightness: ${v.brightness.toInt()}", v.brightness, -50f..50f) { x -> setVintage { it.copy(brightness = x) } }
                                     SpSliderRow("Saturation: ${v.saturation.toInt()}", v.saturation, -50f..50f) { x -> setVintage { it.copy(saturation = x) } }
                                     SpSliderRow("Style strength: ${v.strength.toInt()}", v.strength, 0f..100f) { x -> setVintage { it.copy(strength = x) } }
                                     SpSliderRow("Vignette strength: ${v.vignette.toInt()}", v.vignette, 0f..100f) { x -> setVintage { it.copy(vignette = x) } }
-                                    SpChip("Reset", false) { setVintage { VintageState(on = true) } }
+                                    SpChip("Reset", false) { setVintage { VintageState(on = true, tint = it.tint) } }
                                 } else {
-                                    SpHint("Turn this on for a faded, tinted retro look. Pick a Yellow, Green, Blue or Red tint and tune it.")
+                                    SpHint("No vintage effect yet. Pick a Yellow, Green, Blue or Red tint for a faded retro look.")
                                 }
                             }
                             // ------------------------------------------------ 5c. GLAMOUR GLOW
                             SpTool.GLAMOUR -> {
                                 val g = tools.glamour
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Glamour Glow", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                                    Switch(checked = g.on, onCheckedChange = { on -> setGlamour { it.copy(on = on) } })
-                                }
-                                if (g.on) {
-                                    SpLabel("Presets")
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        items(GlamourPresets.all) { p ->
-                                            val match = g.glow == p.glow && g.saturation == p.saturation && g.warmth == p.warmth
-                                            SpChip(p.name, match) { setGlamour { it.copy(glow = p.glow, saturation = p.saturation, warmth = p.warmth) } }
+                                SpLabel("Glamour glow")
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SpOptionCard("Original", !g.on, icon = Icons.Default.Block) { setGlamour { it.copy(on = false) } }
+                                    GlamourPresets.all.forEach { p ->
+                                        val match = g.on && g.glow == p.glow && g.saturation == p.saturation && g.warmth == p.warmth
+                                        SpOptionCard(p.name, match, icon = Icons.Default.AutoAwesome) {
+                                            setGlamour { it.copy(on = true, glow = p.glow, saturation = p.saturation, warmth = p.warmth) }
                                         }
                                     }
+                                }
+                                if (g.on) {
                                     SpSliderRow("Glow: ${g.glow.toInt()}", g.glow, 0f..100f) { x -> setGlamour { it.copy(glow = x) } }
                                     SpSliderRow("Saturation: ${g.saturation.toInt()}", g.saturation, -50f..50f) { x -> setGlamour { it.copy(saturation = x) } }
                                     SpSliderRow("Warmth: ${g.warmth.toInt()}", g.warmth, -50f..50f) { x -> setGlamour { it.copy(warmth = x) } }
                                 } else {
-                                    SpHint("Adds a soft-focus, dreamy glow. Turn it on and pick a preset or tune Glow, Saturation and Warmth.")
+                                    SpHint("No glow yet. Pick a preset for a soft-focus, dreamy look.")
                                 }
                             }
                             // ------------------------------------------------ 5d. LENS BLUR
                             SpTool.LENS -> {
                                 val l = tools.lens
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Lens blur", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                                    Switch(checked = l.on, onCheckedChange = { on -> setLens { it.copy(on = on) } })
+                                SpLabel("Lens blur")
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SpOptionCard("Original", !l.on, icon = Icons.Default.Block) { setLens { it.copy(on = false) } }
+                                    LensBlurMode.entries.forEach { m ->
+                                        SpOptionCard(
+                                            m.label, l.on && l.mode == m,
+                                            icon = if (m == LensBlurMode.CIRCULAR) Icons.Default.BlurCircular else Icons.Default.BlurLinear
+                                        ) { setLens { it.copy(on = true, mode = m) } }
+                                    }
                                 }
                                 if (l.on) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        LensBlurMode.entries.forEach { m -> SpChip(m.label, l.mode == m) { setLens { it.copy(mode = m) } } }
-                                    }
                                     SpSliderRow("Clear zone: ${(l.clear * 100).toInt()}", l.clear * 100f, 4f..60f) { x -> setLens { it.copy(clear = x / 100f) } }
                                     SpSliderRow("Transition feather: ${(l.feather * 100).toInt()}", l.feather * 100f, 2f..50f) { x -> setLens { it.copy(feather = x / 100f) } }
                                     SpSliderRow("Blur intensity: ${l.amount.toInt()}", l.amount, 0f..100f) { x -> setLens { it.copy(amount = x) } }
                                     SpHint("Drag on the photo to move the sharp zone, pinch to resize it.")
                                 } else {
-                                    SpHint("Keeps a circular or horizontal zone sharp and blurs the rest, with a soft transition ring.")
+                                    SpHint("No lens blur yet. Pick Circular or Horizontal to keep a zone sharp and blur the rest.")
                                 }
                             }
                             // ------------------------------------------------ 5e. PERSPECTIVE
@@ -1733,7 +1844,7 @@ fun SinglePhotoEditorScreen(
             // ---------------- selective tool: eye toggle + popup control strip (outside the gesture surface)
             if (tool == SpTool.SELECTIVE) {
                 SpSelectiveOverlay(
-                    point = tools.selective.firstOrNull { it.id == activePointId },
+                    point = null,   // the controller is shown in the tool panel now (SpSelectiveControls); the eye stays on the canvas
                     param = selParam,
                     showPoints = showPoints,
                     onParam = { selParam = it },
@@ -1751,29 +1862,30 @@ fun SinglePhotoEditorScreen(
         }
     }
 
-    // =============================================================== add / edit text
+    // =============================================================== add / edit text (animated dialog)
     if (textDialogOpen) {
         val eid = editingTextId
-        var temp by remember(eid) { mutableStateOf(overlays.firstOrNull { it.id == eid }?.content ?: "") }
-        AlertDialog(
-            onDismissRequest = { textDialogOpen = false },
-            title = { Text(if (eid == null) "Add text" else "Edit text") },
-            text = { OutlinedTextField(value = temp, onValueChange = { temp = it }, singleLine = true, label = { Text("Text") }) },
-            confirmButton = {
-                Button(onClick = {
-                    if (temp.isNotBlank()) {
-                        if (eid != null) updateOverlay(eid) { it.copy(content = temp) }
-                        else {
-                            val n = newFreestyleText(temp)
-                            overlays = overlays + n
-                            selectedId = n.id
-                        }
+        val editing = overlays.firstOrNull { it.id == eid }
+        key(eid) {
+            SpTextDialog(
+                isEdit = eid != null,
+                initialText = editing?.content ?: "",
+                initialFont = editing?.fontName ?: defaultText.fontName,
+                initialColor = Color((editing?.colorLong ?: defaultText.colorLong).toInt()),
+                onDismiss = { textDialogOpen = false },
+                onConfirm = { text, font, color ->
+                    val argb = color.toArgb().toLong() and 0xFFFFFFFFL
+                    if (eid != null) {
+                        updateOverlay(eid) { it.copy(content = text, fontName = font, colorLong = argb) }
+                    } else {
+                        val n = newFreestyleText(text).copy(fontName = font, colorLong = argb)
+                        overlays = overlays + n
+                        selectedId = n.id
                     }
                     textDialogOpen = false
-                }) { Text("Apply") }
-            },
-            dismissButton = { TextButton(onClick = { textDialogOpen = false }) { Text("Cancel") } }
-        )
+                }
+            )
+        }
     }
 
     // =============================================================== unified export screen
@@ -1946,6 +2058,205 @@ private fun SpSelectiveOverlay(
                         value = v, onValueChange = onValue, valueRange = -50f..50f,
                         modifier = Modifier.fillMaxWidth().height(32.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+/** Prominent per-tool Reset button; enabled only while the tool has changes. */
+@Composable
+private fun SpResetButton(enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(20.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2563EB), disabledContentColor = Color(0xFFCBD5E1)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (enabled) Color(0xFF2563EB) else Color(0xFFE2E8F0)),
+        modifier = Modifier.height(30.dp)
+    ) {
+        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text("Reset", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** Selectable option tile ("Original" / presets) used by Vintage, Glamour, Blur and Lens Blur. */
+@Composable
+private fun SpOptionCard(label: String, selected: Boolean, swatch: Color? = null, icon: ImageVector? = null, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier.width(84.dp).height(62.dp).clip(shape)
+            .background(if (selected) Color(0xFFEFF6FF) else Color.White)
+            .border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF2563EB) else Color(0xFFCBD5E1), shape)
+            .clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        when {
+            swatch != null -> Box(Modifier.size(18.dp).clip(CircleShape).background(swatch).border(1.dp, Color(0x33000000), CircleShape))
+            icon != null -> Icon(icon, null, modifier = Modifier.size(18.dp), tint = if (selected) Color(0xFF2563EB) else Color(0xFF64748B))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            label, fontSize = 11.sp, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) Color(0xFF2563EB) else Color(0xFF334155)
+        )
+    }
+}
+
+/** In-place controller of the active Selective point: Brightness / Contrast / Saturation / Structure + delete. */
+@Composable
+private fun SpSelectiveControls(point: SelectivePoint, param: SelParam, onParam: (SelParam) -> Unit, onValue: (Float) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            SelParam.entries.forEach { sp ->
+                val sel = sp == param
+                val edited = abs(point.valueOf(sp)) >= 0.5f
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(if (sel) Color(0xFFEFF6FF) else Color.Transparent)
+                        .clickable { onParam(sp) }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Icon(sp.icon, null, modifier = Modifier.size(18.dp),
+                        tint = if (sel) Color(0xFF2563EB) else if (edited) Color(0xFF16A34A) else Color(0xFF64748B))
+                    Text(sp.label, fontSize = 10.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                        color = if (sel) Color(0xFF2563EB) else Color(0xFF64748B))
+                }
+            }
+        }
+        val v = point.valueOf(param)
+        Text("${param.label}: ${if (v > 0f) "+" else ""}${v.toInt()}", fontSize = 11.sp, color = Color(0xFF334155))
+        FluidSlider(value = v, onValueChange = onValue, valueRange = -50f..50f, modifier = Modifier.fillMaxWidth().height(32.dp))
+    }
+}
+
+private fun spFontPreview(font: String, size: androidx.compose.ui.unit.TextUnit): TextStyle = when (font) {
+    "Script" -> TextStyle(fontStyle = FontStyle.Italic, fontWeight = FontWeight.Bold, fontSize = size)
+    "Bold" -> TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = size)
+    "Retro" -> TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = size)
+    "Serif" -> TextStyle(fontFamily = FontFamily.Serif, fontSize = size)
+    "Neon" -> TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = size)
+    else -> TextStyle(fontWeight = FontWeight.Medium, fontSize = size)
+}
+
+/**
+ * Animated add / edit text dialog: the card springs in (AnimatedVisibility), then the input, the font preview chips
+ * and the colour picker fade in one after another. A live preview shows the text in the chosen font and colour.
+ */
+@Composable
+private fun SpTextDialog(
+    isEdit: Boolean,
+    initialText: String,
+    initialFont: String,
+    initialColor: Color,
+    onDismiss: () -> Unit,
+    onConfirm: (text: String, font: String, color: Color) -> Unit
+) {
+    var text by remember { mutableStateOf(initialText) }
+    var font by remember { mutableStateOf(initialFont) }
+    var color by remember { mutableStateOf(initialColor) }
+    var showCard by remember { mutableStateOf(false) }
+    var showInput by remember { mutableStateOf(false) }
+    var showFonts by remember { mutableStateOf(false) }
+    var showColors by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        showCard = true
+        delay(120); showInput = true
+        delay(90); showFonts = true
+        delay(90); showColors = true
+        delay(100)
+        runCatching { focus.requestFocus() }
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        AnimatedVisibility(
+            visible = showCard,
+            enter = fadeIn(tween(180)) +
+                    scaleIn(initialScale = 0.85f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) +
+                    slideInVertically(tween(260)) { it / 6 }
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(0.92f),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(12.dp)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(if (isEdit) "Edit text" else "Add text", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+
+                    // live preview
+                    Box(
+                        Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1E293B)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text.ifBlank { "Your text" },
+                            style = spFontPreview(font, 24.sp).copy(color = if (text.isBlank()) color.copy(alpha = 0.4f) else color),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                    }
+
+                    AnimatedVisibility(showInput, enter = fadeIn(tween(220)) + expandVertically(tween(220))) {
+                        OutlinedTextField(
+                            value = text, onValueChange = { text = it },
+                            singleLine = true,
+                            placeholder = { Text("Type something…") },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF2563EB), unfocusedBorderColor = Color(0xFFCBD5E1),
+                                focusedContainerColor = Color(0xFFF8FAFC), unfocusedContainerColor = Color(0xFFF8FAFC)
+                            ),
+                            modifier = Modifier.fillMaxWidth().focusRequester(focus)
+                        )
+                    }
+
+                    AnimatedVisibility(showFonts, enter = fadeIn(tween(220)) + expandVertically(tween(220))) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SpLabel("Font")
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(SpFonts) { f ->
+                                    val sel = f == font
+                                    Box(
+                                        Modifier.clip(RoundedCornerShape(14.dp))
+                                            .background(if (sel) Color(0xFF0F172A) else Color(0xFFF1F5F9))
+                                            .border(1.dp, if (sel) Color(0xFF0F172A) else Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
+                                            .clickable { font = f }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(f, style = spFontPreview(f, 15.sp).copy(color = if (sel) Color.White else Color(0xFF334155)))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(showColors, enter = fadeIn(tween(220)) + expandVertically(tween(220))) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SpLabel("Color")
+                            SpColorRow(color) { color = it }
+                        }
+                    }
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            enabled = text.isNotBlank(),
+                            onClick = { onConfirm(text.trim(), font, color) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                        ) { Text(if (isEdit) "Apply" else "Add") }
+                    }
                 }
             }
         }
