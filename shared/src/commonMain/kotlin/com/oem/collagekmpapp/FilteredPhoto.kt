@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -61,10 +62,52 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import com.oem.collagekmpapp.components.FluidSlider
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
+
+// ====================================================================================
+//  High-resolution photo loading
+//  12-48 MP camera photos must never be decoded at native size just to fill a phone-sized box.
+//  Coil decodes on its own background dispatcher; here we additionally cap the DECODED size.
+//  Sizes are bucketed (512 / 1024 / 2048) so a box that is being resized does not re-decode every frame,
+//  and all layers of one photo share a single cached bitmap.
+// ====================================================================================
+/** Longest-side decode cap (px) for photos drawn below this point in the tree. 0 = let Coil use the layout size. */
+internal val LocalPhotoDecodePx = compositionLocalOf { 0 }
+
+private const val MAX_DECODE_PX = 2048
+
+/** Rounds up to 512 / 1024 / 2048 (never above [MAX_DECODE_PX]). */
+internal fun decodeBucket(px: Int): Int = when {
+    px <= 512 -> 512
+    px <= 1024 -> 1024
+    else -> MAX_DECODE_PX
+}
+
+/**
+ * Coil request that decodes [data] no larger than [maxSidePx] on its longest side (aspect ratio kept,
+ * precision INEXACT so the decoder may sub-sample). Use instead of passing the raw uri as `model`
+ * for any local (camera / gallery) photo.
+ */
+@Composable
+fun rememberPhotoRequest(data: Any?, maxSidePx: Int = MAX_DECODE_PX): ImageRequest {
+    val context = LocalPlatformContext.current
+    val side = decodeBucket(maxSidePx)
+    return remember(context, data, side) {
+        ImageRequest.Builder(context)
+            .data(data)
+            .size(coil3.size.Size(side, side))
+            .scale(coil3.size.Scale.FIT)
+            .precision(coil3.size.Precision.INEXACT)
+            .build()
+    }
+}
 
 // ====================================================================================
 //  FilteredPhoto: one photo with the COMPLETE look
@@ -83,7 +126,11 @@ fun FilteredPhoto(
     /** Width in px of the whole collage canvas. Film grain is sized relative to it (tile = 256 px @ 1080 px canvas) so preview == export. 0 = legacy 1:1 pixels. */
     canvasWidthPx: Float = 0f,
     /** Reports the decoded image aspect (w/h) once loaded (used by Freestyle frames). */
-    onImageAspect: ((Float) -> Unit)? = null
+    onImageAspect: ((Float) -> Unit)? = null,
+    /** Lens Blur (clear zone + feather ring + outer blur). Position is normalised over this photo box. null / off = none. */
+    lens: LensBlurState? = null,
+    /** Selective-edit control points (normalised over this photo box). */
+    selective: List<SelectivePoint> = emptyList()
 ) {
     val grade = remember(matrix) { matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     val inverted = remember(matrix) { ColorFilter.colorMatrix(ColorMatrix(PhotoColorEngine.inverted(matrix))) }
@@ -93,74 +140,131 @@ fun FilteredPhoto(
         modifier = modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     ) {
         val w = maxWidth
-
-        // 1. base photo (+ real blur)
-        PhotoLayer(
-            uri, grade, imageModifier,
-            if (effects.blur > 0.01f) Modifier.blur(w * (EffectRadii.BLUR * effects.blur), edge) else Modifier,
-            onImageAspect
+        // 2x headroom for pinch-zoom (up to 4x is cropped away), then bucketed + capped
+        val boxPx = maxOf(
+            if (constraints.hasBoundedWidth) constraints.maxWidth else MAX_DECODE_PX,
+            if (constraints.hasBoundedHeight) constraints.maxHeight else MAX_DECODE_PX
         )
+        val decodePx = decodeBucket(boxPx * 2)
 
-        // 2. soften
-        if (effects.soften > 0.01f) {
-            PhotoLayer(uri, grade, imageModifier, Modifier.alpha(effects.soften * 0.85f).blur(w * EffectRadii.SOFTEN, edge))
-        }
+        CompositionLocalProvider(LocalPhotoDecodePx provides decodePx) {
+            // Everything that touches the photo pixels. Drawn once, or twice when Lens Blur is on
+            // (a sharp copy + a blurred, masked copy of the SAME fully-processed stack).
+            val stack: @Composable () -> Unit = {
+                // 1. base photo (+ real blur)
+                PhotoLayer(
+                    uri, grade, imageModifier,
+                    if (effects.blur > 0.01f) Modifier.blur(w * (EffectRadii.BLUR * effects.blur), edge) else Modifier,
+                    onImageAspect
+                )
 
-        // 3. clarity (negative = dreamy soft, positive = local contrast)
-        if (effects.clarity < -0.01f) {
-            PhotoLayer(uri, grade, imageModifier, Modifier.alpha(-effects.clarity * 0.7f).blur(w * EffectRadii.CLARITY, edge))
-        } else if (effects.clarity > 0.01f) {
-            HighPassLayer(uri, grade, inverted, imageModifier, w * EffectRadii.CLARITY, effects.clarity)
-        }
-
-        // 4. sharpen
-        if (effects.sharpen > 0.01f) {
-            HighPassLayer(uri, grade, inverted, imageModifier, w * EffectRadii.SHARPEN, effects.sharpen)
-        }
-
-        // 5. glow / bloom
-        if (effects.glow > 0.01f) {
-            PhotoLayer(
-                uri, grade, imageModifier,
-                Modifier.blendLayer(BlendMode.Screen, effects.glow * 0.6f).blur(w * EffectRadii.GLOW, edge)
-            )
-        }
-
-        // 6. film grain
-        if (effects.grain > 0.01f) {
-            Box(
-                Modifier.fillMaxSize().drawBehind {
-                    val k = if (canvasWidthPx > 0f) canvasWidthPx / 1080f else 1f   // exporter: exportScale = canvasW / 1080
-                    withTransform({ scale(k, k, Offset.Zero) }) {
-                        drawRect(
-                            brush = GrainTexture.brush,
-                            topLeft = Offset.Zero,
-                            size = Size(size.width / k, size.height / k),
-                            alpha = effects.grain * 0.55f,
-                            blendMode = BlendMode.Overlay
-                        )
-                    }
+                // 2. soften
+                if (effects.soften > 0.01f) {
+                    PhotoLayer(uri, grade, imageModifier, Modifier.alpha(effects.soften * 0.85f).blur(w * EffectRadii.SOFTEN, edge))
                 }
-            )
-        }
 
-        // 7. vignette (negative = white)
-        if (abs(effects.vignette) > 0.01f) {
-            val base = if (effects.vignette > 0f) Color.Black else Color.White
-            Box(
-                Modifier.fillMaxSize().drawBehind {
-                    val radius = hypot(size.width, size.height) / 2f
-                    drawRect(
-                        brush = Brush.radialGradient(
-                            0.5f to base.copy(alpha = 0f),
-                            1f to base.copy(alpha = abs(effects.vignette)),
-                            center = center,
-                            radius = radius
-                        )
+                // 3. clarity (negative = dreamy soft, positive = local contrast)
+                if (effects.clarity < -0.01f) {
+                    PhotoLayer(uri, grade, imageModifier, Modifier.alpha(-effects.clarity * 0.7f).blur(w * EffectRadii.CLARITY, edge))
+                } else if (effects.clarity > 0.01f) {
+                    HighPassLayer(uri, grade, inverted, imageModifier, w * EffectRadii.CLARITY, effects.clarity)
+                }
+
+                // 4. sharpen
+                if (effects.sharpen > 0.01f) {
+                    HighPassLayer(uri, grade, inverted, imageModifier, w * EffectRadii.SHARPEN, effects.sharpen)
+                }
+
+                // 5. glow / bloom
+                if (effects.glow > 0.01f) {
+                    PhotoLayer(
+                        uri, grade, imageModifier,
+                        Modifier.blendLayer(BlendMode.Screen, effects.glow * 0.6f).blur(w * EffectRadii.GLOW, edge)
                     )
                 }
-            )
-        }
+
+                // 3b. structure (mid-tone local contrast; negative = smoother)
+                if (effects.structure > 0.01f) {
+                    HighPassLayer(uri, grade, inverted, imageModifier, w * EffectRadii.STRUCTURE, effects.structure)
+                } else if (effects.structure < -0.01f) {
+                    PhotoLayer(uri, grade, imageModifier, Modifier.alpha(-effects.structure * 0.6f).blur(w * (EffectRadii.STRUCTURE * 2f), edge))
+                }
+
+                // 5b. glamour glow: soft-focus blend + screen bloom of a heavily blurred copy
+                if (effects.glamour > 0.01f) {
+                    PhotoLayer(uri, grade, imageModifier, Modifier.alpha(effects.glamour * 0.45f).blur(w * EffectRadii.GLAMOUR, edge))
+                    PhotoLayer(
+                        uri, grade, imageModifier,
+                        Modifier.blendLayer(BlendMode.Screen, effects.glamour * 0.5f).blur(w * EffectRadii.GLAMOUR, edge)
+                    )
+                }
+
+                // 5c. selective edit: each control point = a locally graded copy of the photo, masked by a soft circle
+                selective.forEach { p ->
+                    if (!p.isNeutral) key(p.id) {
+                        val pm = remember(matrix, p.brightness, p.contrast, p.saturation) { PhotoColorEngine.selectiveMatrix(matrix, p) }
+                        val pGrade = remember(pm) { ColorFilter.colorMatrix(ColorMatrix(pm)) }
+                        val pInv = remember(pm) { ColorFilter.colorMatrix(ColorMatrix(PhotoColorEngine.inverted(pm))) }
+                        Box(Modifier.fillMaxSize().pointMask(p.x, p.y, p.radius)) {
+                            PhotoLayer(uri, pGrade, imageModifier, Modifier)
+                            if (p.structure > 0.5f) {
+                                HighPassLayer(uri, pGrade, pInv, imageModifier, w * EffectRadii.STRUCTURE, p.structure / 50f)
+                            } else if (p.structure < -0.5f) {
+                                PhotoLayer(uri, pGrade, imageModifier, Modifier.alpha(-p.structure / 50f * 0.7f).blur(w * EffectRadii.CLARITY, edge))
+                            }
+                        }
+                    }
+                }
+            }
+
+            stack()
+
+            // 5d. lens blur: blurred copy of the whole stack, hidden inside the clear zone, fading in across the feather ring
+            val lensSpec = lens?.takeIf { it.active }
+            if (lensSpec != null) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .lensOuterMask(lensSpec)
+                        .blur(w * (EffectRadii.LENS * (lensSpec.amount / 100f)), edge)
+                ) { stack() }
+            }
+
+            // 6. film grain
+            if (effects.grain > 0.01f) {
+                Box(
+                    Modifier.fillMaxSize().drawBehind {
+                        val k = if (canvasWidthPx > 0f) canvasWidthPx / 1080f else 1f   // exporter: exportScale = canvasW / 1080
+                        withTransform({ scale(k, k, Offset.Zero) }) {
+                            drawRect(
+                                brush = GrainTexture.brush,
+                                topLeft = Offset.Zero,
+                                size = Size(size.width / k, size.height / k),
+                                alpha = effects.grain * 0.55f,
+                                blendMode = BlendMode.Overlay
+                            )
+                        }
+                    }
+                )
+            }
+
+            // 7. vignette (negative = white)
+            if (abs(effects.vignette) > 0.01f) {
+                val base = if (effects.vignette > 0f) Color.Black else Color.White
+                Box(
+                    Modifier.fillMaxSize().drawBehind {
+                        val radius = hypot(size.width, size.height) / 2f
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                0.5f to base.copy(alpha = 0f),
+                                1f to base.copy(alpha = abs(effects.vignette)),
+                                center = center,
+                                radius = radius
+                            )
+                        )
+                    }
+                )
+            }
+        }   // CompositionLocalProvider
     }
 }
 
@@ -172,8 +276,9 @@ private fun PhotoLayer(
     extra: Modifier,
     onAspect: ((Float) -> Unit)? = null
 ) {
+    val decodePx = LocalPhotoDecodePx.current
     AsyncImage(
-        model = uri,
+        model = if (decodePx > 0) rememberPhotoRequest(uri, decodePx) else uri,
         contentDescription = null,
         contentScale = ContentScale.Crop,
         colorFilter = filter,
@@ -212,6 +317,49 @@ private fun Modifier.blendLayer(mode: BlendMode, alpha: Float): Modifier = drawW
         canvas.restore()
     }
 }
+
+/** Keeps only the soft-edged disc (normalised centre / radius-as-fraction-of-width) of whatever this wraps. */
+private fun Modifier.pointMask(nx: Float, ny: Float, nr: Float): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        drawRect(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(0f to Color.Black, 0.35f to Color.Black, 1f to Color.Transparent),
+                center = Offset(nx * size.width, ny * size.height),
+                radius = (nr * size.width).coerceAtLeast(1f)
+            ),
+            blendMode = BlendMode.DstIn
+        )
+    }
+
+/**
+ * Lens blur mask: transparent inside the clear zone, opaque outside the feather ring.
+ * Circular = circle, Horizontal = ellipse (the gradient is a circle drawn in a vertically squashed space).
+ */
+private fun Modifier.lensOuterMask(l: LensBlurState): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val cx = l.cx * size.width
+        val cy = l.cy * size.height
+        val total = (l.clear + l.feather).coerceAtLeast(0.001f)
+        val rx = (total * size.width * l.axisX).coerceAtLeast(1f)
+        val k = l.axisY / l.axisX
+        val inner = (l.clear / total).coerceIn(0f, 0.99f)
+        withTransform({ scale(1f, k, Offset(cx, cy)) }) {
+            drawRect(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(0f to Color.Transparent, inner to Color.Transparent, 1f to Color.Black),
+                    center = Offset(cx, cy),
+                    radius = rx
+                ),
+                topLeft = Offset(0f, cy - cy / k),
+                size = Size(size.width, size.height / k),
+                blendMode = BlendMode.DstIn
+            )
+        }
+    }
 
 /** Tiled noise texture built from the shared GrainPattern (same pattern as the exporter). */
 private object GrainTexture {

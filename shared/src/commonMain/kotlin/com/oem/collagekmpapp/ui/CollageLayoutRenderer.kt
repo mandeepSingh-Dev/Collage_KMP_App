@@ -7,6 +7,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -253,10 +258,61 @@ fun CollageImageSlot(
 
     val finalModifier = if (!isDrawingMode) {
         boxModifier.pointerInput(uri) {
-            detectTransformGestures { _, pan, zoom, _ ->
-                scale = (scale * zoom).coerceIn(0.5f, 4f)
-                offset += pan
-                onTransformChanged?.invoke(scale, offset)
+            // Pan / pinch-zoom with snap-to-centre, plus double-tap-to-reset.
+            // Single taps are NOT consumed, so the parent's "select this box" tap still works.
+            val snapThresholdPx = 20f
+            var lastTapUptime = 0L
+            var lastTapPos = Offset.Zero
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var rawOffset = offset            // un-snapped position, so slow drags can leave the centre
+                var pastSlop = false
+                var zoomAcc = 1f
+                var panAcc = Offset.Zero
+                var multiTouch = false
+                var lastEventTime = down.uptimeMillis
+                do {
+                    val event = awaitPointerEvent()
+                    event.changes.firstOrNull()?.let { lastEventTime = it.uptimeMillis }
+                    if (event.changes.count { it.pressed } > 1) multiTouch = true
+                    if (event.changes.none { it.isConsumed }) {
+                        val zoom = event.calculateZoom()
+                        val pan = event.calculatePan()
+                        if (!pastSlop) {
+                            zoomAcc *= zoom
+                            panAcc += pan
+                            val zoomMotion = kotlin.math.abs(1f - zoomAcc) * 200f   // same feel as detectTransformGestures
+                            if (zoomMotion > viewConfiguration.touchSlop || panAcc.getDistance() > viewConfiguration.touchSlop) {
+                                pastSlop = true
+                            }
+                        }
+                        if (pastSlop) {
+                            if (zoom != 1f || pan != Offset.Zero) {
+                                scale = (scale * zoom).coerceIn(0.5f, 4f)
+                                rawOffset += pan
+                                offset = if (kotlin.math.abs(rawOffset.x) < snapThresholdPx &&
+                                    kotlin.math.abs(rawOffset.y) < snapThresholdPx) Offset.Zero else rawOffset
+                                onTransformChanged?.invoke(scale, offset)
+                            }
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+                    }
+                } while (event.changes.any { it.pressed })
+
+                // finger(s) lifted without dragging = a tap; two quick taps = reset
+                if (!pastSlop && !multiTouch) {
+                    val now = lastEventTime
+                    if (lastTapUptime != 0L && now - lastTapUptime < 300L &&
+                        (down.position - lastTapPos).getDistance() < viewConfiguration.touchSlop * 4f) {
+                        scale = 1f
+                        offset = Offset.Zero
+                        onTransformChanged?.invoke(scale, offset)
+                        lastTapUptime = 0L
+                    } else {
+                        lastTapUptime = now
+                        lastTapPos = down.position
+                    }
+                }
             }
         }
     } else {

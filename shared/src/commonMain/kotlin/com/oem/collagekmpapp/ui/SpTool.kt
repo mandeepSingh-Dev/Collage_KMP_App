@@ -33,12 +33,14 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.RectangleShape
@@ -47,6 +49,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -68,19 +72,39 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.rememberPhotoRequest
 import com.oem.collagekmpapp.BackgroundTexture
 import com.oem.collagekmpapp.AdjustTools
 import com.oem.collagekmpapp.FilterPickerPanel
+import com.oem.collagekmpapp.FilteredPhoto
+import com.oem.collagekmpapp.GlamourPresets
+import com.oem.collagekmpapp.GlamourState
+import com.oem.collagekmpapp.LensBlurMode
+import com.oem.collagekmpapp.LensBlurState
+import com.oem.collagekmpapp.PerspectiveFill
+import com.oem.collagekmpapp.PerspectiveMode
+import com.oem.collagekmpapp.PerspectiveState
+import com.oem.collagekmpapp.PhotoEffects
+import com.oem.collagekmpapp.PhotoToolsState
+import com.oem.collagekmpapp.SELECTIVE_MAX_POINTS
+import com.oem.collagekmpapp.SELECTIVE_MAX_RADIUS
+import com.oem.collagekmpapp.SELECTIVE_MIN_RADIUS
+import com.oem.collagekmpapp.SelectivePoint
+import com.oem.collagekmpapp.VintageState
+import com.oem.collagekmpapp.VintageTint
+import com.oem.collagekmpapp.perspectiveMatrix
 import com.oem.collagekmpapp.FreestyleItem
 import com.oem.collagekmpapp.FreestyleItemKind
 import com.oem.collagekmpapp.FreestyleProject
 import com.oem.collagekmpapp.PhotoColorEngine
 import com.oem.collagekmpapp.USE_LEGACY_EXPORT_DIALOG
+import com.oem.collagekmpapp.UndoRedoActions
 import com.oem.collagekmpapp.UnifiedExportScreen
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.model.*
 import com.oem.collagekmpapp.newFreestyleEmoji
 import com.oem.collagekmpapp.newFreestyleText
+import com.oem.collagekmpapp.rememberEditHistory
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
@@ -89,6 +113,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 // =====================================================================================
 // Models
@@ -100,7 +125,12 @@ private enum class SpTool(val label: String, val icon: ImageVector) {
     CROP("Crop", Icons.Default.CropRotate),
     FILTER("Filter", Icons.Default.Star),
     ADJUST("Adjust", Icons.Default.Tune),
+    SELECTIVE("Selective", Icons.Default.TouchApp),
+    VINTAGE("Vintage", Icons.Default.FilterVintage),
+    GLAMOUR("Glamour", Icons.Default.AutoAwesome),
     BLUR("Blur", Icons.Default.BlurOn),
+    LENS("Lens Blur", Icons.Default.BlurCircular),
+    PERSPECTIVE("Perspective", Icons.Default.Transform),
     STICKERS("Stickers", Icons.Default.EmojiEmotions),
     TEXT("Text", Icons.Default.TextFields),
     BACKGROUND("Backdrop", Icons.Default.Wallpaper),
@@ -322,6 +352,76 @@ private fun Modifier.spCircleMask(cx: Float, cy: Float, r: Float, feather: Float
         )
     }
 
+/**
+ * Maps between canvas pixels and the cropped photo box (normalised 0..1 in the photo's OWN axes) using the same
+ * transform order as the preview / exporter: box -> centre scale -> rotate -> flip, all about the canvas centre.
+ * Selective points and the lens-blur centre live in box space so they follow the photo when it is rotated / scaled.
+ */
+private class SpGeo(
+    val w: Float, val h: Float,          // canvas px
+    val dw: Float, val dh: Float,        // un-rotated cropped box px
+    val angle: Float,                    // fine angle + quarter turns (degrees)
+    val sx: Float, val sy: Float,        // centre scale * H / V scale
+    val flipH: Boolean, val flipV: Boolean
+) {
+    fun toCanvas(n: Offset): Offset {
+        var x = (n.x - 0.5f) * dw * sx
+        var y = (n.y - 0.5f) * dh * sy
+        val r = spRad(angle)
+        val rx = x * cos(r) - y * sin(r)
+        val ry = x * sin(r) + y * cos(r)
+        x = if (flipH) -rx else rx
+        y = if (flipV) -ry else ry
+        return Offset(w / 2f + x, h / 2f + y)
+    }
+
+    fun toBox(p: Offset): Offset {
+        var x = p.x - w / 2f
+        var y = p.y - h / 2f
+        if (flipH) x = -x
+        if (flipV) y = -y
+        val r = -spRad(angle)
+        val ux = x * cos(r) - y * sin(r)
+        val uy = x * sin(r) + y * cos(r)
+        return Offset(ux / sx / dw + 0.5f, uy / sy / dh + 0.5f)
+    }
+
+    /** A canvas-space finger movement expressed in box-normalised units. */
+    fun panToBox(pan: Offset): Offset {
+        val c = Offset(w / 2f, h / 2f)
+        return toBox(c + pan) - toBox(c)
+    }
+
+    /** Canvas px that one box-width occupies (uniform approximation of the H / V scales). */
+    val pxPerBoxWidth: Float get() = dw * sqrt(sx * sy)
+}
+
+/** Projective warp of everything this modifier wraps (the photo layer), see PerspectiveState / perspectiveMatrix. */
+private fun Modifier.spPerspective(m: Matrix): Modifier = this.drawWithContent {
+    withTransform({ transform(m) }) { this@drawWithContent.drawContent() }
+}
+
+private enum class SelParam(val label: String, val icon: ImageVector) {
+    BRIGHTNESS("Brightness", Icons.Default.WbSunny),
+    CONTRAST("Contrast", Icons.Default.Contrast),
+    SATURATION("Saturation", Icons.Default.Palette),
+    STRUCTURE("Structure", Icons.Default.Texture)
+}
+
+private fun SelectivePoint.valueOf(p: SelParam): Float = when (p) {
+    SelParam.BRIGHTNESS -> brightness
+    SelParam.CONTRAST -> contrast
+    SelParam.SATURATION -> saturation
+    SelParam.STRUCTURE -> structure
+}
+
+private fun SelectivePoint.withValue(p: SelParam, v: Float): SelectivePoint = when (p) {
+    SelParam.BRIGHTNESS -> copy(brightness = v)
+    SelParam.CONTRAST -> copy(contrast = v)
+    SelParam.SATURATION -> copy(saturation = v)
+    SelParam.STRUCTURE -> copy(structure = v)
+}
+
 // =====================================================================================
 // Small UI pieces
 // =====================================================================================
@@ -333,7 +433,7 @@ private fun SpChip(text: String, selected: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(20.dp))
             .background(if (selected) Color(0xFF0F172A) else Color(0xFFF1F5F9))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         Text(
             text, fontSize = 12.sp,
@@ -362,7 +462,7 @@ private fun SpLabel(text: String) =
     Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
 
 @Composable
-private fun SpHint(text: String) = Text(text, fontSize = 13.sp, color = Color(0xFF64748B))
+private fun SpHint(text: String) = Text(text, fontSize = 12.sp, color = Color(0xFF64748B))
 
 @Composable
 private fun SpSliderRow(label: String, value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
@@ -441,6 +541,12 @@ private fun SpPhotoLayer(
     canvasH: Float,
     colorFilter: ColorFilter?,
     vignette: Float,
+    // --- new: full look (filter + adjust + Snapseed tools) through FilteredPhoto, same engine as the exporter.
+    //     null effects = legacy path (colour filter + simple vignette only).
+    matrix: FloatArray? = null,
+    effects: PhotoEffects? = null,
+    lens: LensBlurState? = null,
+    selective: List<SelectivePoint> = emptyList(),
     onAspect: (Float) -> Unit
 ) {
     val density = LocalDensity.current
@@ -468,27 +574,48 @@ private fun SpPhotoLayer(
                 }
                 .clip(RectangleShape)
         ) {
-            AsyncImage(
-                model = uri,
-                contentDescription = null,
-                contentScale = ContentScale.FillBounds,
-                colorFilter = colorFilter,
-                onSuccess = { s ->
-                    val sz = s.painter.intrinsicSize
-                    if (sz.width > 0f && sz.height > 0f) onAspect(sz.width / sz.height)
-                },
-                modifier = Modifier.layout { measurable, constraints ->
-                    val p = measurable.measure(
-                        Constraints.fixed(fullW.roundToInt().coerceAtLeast(1), fullH.roundToInt().coerceAtLeast(1))
-                    )
-                    layout(constraints.maxWidth, constraints.maxHeight) {
-                        p.place(-(crop.l * fullW).roundToInt(), -(crop.t * fullH).roundToInt())
+            if (effects != null) {
+                FilteredPhoto(
+                    uri = uri,
+                    matrix = matrix,
+                    effects = effects,
+                    modifier = Modifier.fillMaxSize(),
+                    imageModifier = Modifier.layout { measurable, constraints ->
+                        val p = measurable.measure(
+                            Constraints.fixed(fullW.roundToInt().coerceAtLeast(1), fullH.roundToInt().coerceAtLeast(1))
+                        )
+                        layout(constraints.maxWidth, constraints.maxHeight) {
+                            p.place(-(crop.l * fullW).roundToInt(), -(crop.t * fullH).roundToInt())
+                        }
+                    },
+                    canvasWidthPx = canvasW,
+                    onImageAspect = onAspect,
+                    lens = lens,
+                    selective = selective
+                )
+            } else {
+                AsyncImage(
+                    model = rememberPhotoRequest(uri, 2048),
+                    contentDescription = null,
+                    contentScale = ContentScale.FillBounds,
+                    colorFilter = colorFilter,
+                    onSuccess = { s ->
+                        val sz = s.painter.intrinsicSize
+                        if (sz.width > 0f && sz.height > 0f) onAspect(sz.width / sz.height)
+                    },
+                    modifier = Modifier.layout { measurable, constraints ->
+                        val p = measurable.measure(
+                            Constraints.fixed(fullW.roundToInt().coerceAtLeast(1), fullH.roundToInt().coerceAtLeast(1))
+                        )
+                        layout(constraints.maxWidth, constraints.maxHeight) {
+                            p.place(-(crop.l * fullW).roundToInt(), -(crop.t * fullH).roundToInt())
+                        }
                     }
+                )
+                if (abs(vignette) > 0.01f) {
+                    val edge = (if (vignette > 0) Color.Black else Color.White).copy(alpha = abs(vignette) * 0.9f)
+                    Box(Modifier.fillMaxSize().background(Brush.radialGradient(0.55f to Color.Transparent, 1f to edge)))
                 }
-            )
-            if (abs(vignette) > 0.01f) {
-                val edge = (if (vignette > 0) Color.Black else Color.White).copy(alpha = abs(vignette) * 0.9f)
-                Box(Modifier.fillMaxSize().background(Brush.radialGradient(0.55f to Color.Transparent, 1f to edge)))
             }
         }
     }
@@ -497,6 +624,21 @@ private fun SpPhotoLayer(
 // =====================================================================================
 // The screen
 // =====================================================================================
+
+/** Everything Undo / Redo restores in the Edit Photo editor. */
+private data class SpSnap(
+    val ratioKey: String, val ratioOverride: Float?, val fit: Boolean,
+    val crop: SpCrop, val cropShape: SpCropShape,
+    val fineAngle: Float, val quarterTurns: Int, val flipH: Boolean, val flipV: Boolean,
+    val scaleH: Float, val scaleV: Float, val centerScale: Float,
+    val filterPreset: String, val filterIntensity: Float, val adjustValues: Map<String, Float>,
+    val blurOn: Boolean, val blurInside: Boolean, val blurAmount: Float, val blurFeather: Float,
+    val blurCx: Float, val blurCy: Float, val blurR: Float,
+    val overlays: List<FreestyleItem>,
+    val bgColor: Color, val bgGradient: List<Long>, val bgBlurPhoto: Boolean, val bgBlur: Float, val bgTexture: BackgroundTexture,
+    val strokes: List<NormalizedDrawStroke>,
+    val tools: PhotoToolsState       // selective points, vintage, lens blur, glamour glow, perspective
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -569,6 +711,14 @@ fun SinglePhotoEditorScreen(
     var brushSize by remember { mutableStateOf(10f) }
     var brushOpacity by remember { mutableStateOf(100f) }
 
+    // ---- Snapseed-style tools (selective, vintage, lens blur, glamour glow, perspective) = ONE undoable value
+    var tools by remember { mutableStateOf(PhotoToolsState()) }
+    // view-only state (not part of Undo / Redo)
+    var activePointId by remember { mutableStateOf<String?>(null) }
+    var showPoints by remember { mutableStateOf(true) }
+    var selParam by remember { mutableStateOf(SelParam.BRIGHTNESS) }
+    var pointSeq by remember { mutableStateOf(0) }
+
     // ---- export
     var showExport by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
@@ -579,12 +729,36 @@ fun SinglePhotoEditorScreen(
         overlays = overlays.map { if (it.id == id) f(it) else it }
     }
 
+    fun updatePoint(id: String, f: (SelectivePoint) -> SelectivePoint) {
+        tools = tools.copy(selective = tools.selective.map { if (it.id == id) f(it) else it })
+    }
+    fun setVintage(f: (VintageState) -> VintageState) { tools = tools.copy(vintage = f(tools.vintage)) }
+    fun setLens(f: (LensBlurState) -> LensBlurState) { tools = tools.copy(lens = f(tools.lens)) }
+    fun setGlamour(f: (GlamourState) -> GlamourState) { tools = tools.copy(glamour = f(tools.glamour)) }
+    fun setPersp(f: (PerspectiveState) -> PerspectiveState) { tools = tools.copy(perspective = f(tools.perspective)) }
+
+    /** Canvas <-> photo-box mapping for the CURRENT crop / rotation / flip / scale. */
+    fun spGeoAt(cw: Float, ch: Float): SpGeo {
+        val b = spBoxSize(crop, imgAspect, quarterTurns % 2 != 0, fit, cw, ch)
+        return SpGeo(
+            cw, ch, b.x, b.y, fineAngle + quarterTurns * 90f,
+            centerScale / 100f * scaleH / 100f, centerScale / 100f * scaleV / 100f, flipH, flipV
+        )
+    }
+
     val photoFilter = remember(filterPreset, filterIntensity, adjustValues) {
         PhotoColorEngine.buildMatrix(filterPreset, filterIntensity, adjustValues)
             ?.let { ColorFilter.colorMatrix(ColorMatrix(it)) }
     }
     val vignette = remember(filterPreset, filterIntensity, adjustValues) {
         PhotoColorEngine.effects(filterPreset, filterIntensity, adjustValues).vignette
+    }
+    // full look incl. Vintage / Glamour colour + bloom, Structure, Sharpening ... (same engine as the exporter)
+    val photoMatrix = remember(filterPreset, filterIntensity, adjustValues, tools.vintage, tools.glamour) {
+        PhotoColorEngine.buildMatrix(filterPreset, filterIntensity, adjustValues, tools)
+    }
+    val photoFx = remember(filterPreset, filterIntensity, adjustValues, tools.vintage, tools.glamour) {
+        PhotoColorEngine.effects(filterPreset, filterIntensity, adjustValues, tools)
     }
 
     val selected = overlays.firstOrNull { it.id == selectedId }
@@ -635,17 +809,45 @@ fun SinglePhotoEditorScreen(
             blurCx = blurCx,
             blurCy = blurCy,
             blurR = blurR,
-            project = overlayProject
+            project = overlayProject,
+            tools = tools
         )
+    }
+
+    // ---------------------------------------------------------------- Undo / Redo
+    val history = rememberEditHistory(
+        current = SpSnap(
+            ratioKey, ratioOverride, fit, crop, cropShape, fineAngle, quarterTurns, flipH, flipV,
+            scaleH, scaleV, centerScale, filterPreset, filterIntensity, adjustValues,
+            blurOn, blurInside, blurAmount, blurFeather, blurCx, blurCy, blurR,
+            overlays, bgColor, bgGradient, bgBlurPhoto, bgBlur, bgTexture, strokes, tools
+        )
+    ) { snap ->
+        ratioKey = snap.ratioKey; ratioOverride = snap.ratioOverride; fit = snap.fit
+        crop = snap.crop; cropShape = snap.cropShape
+        fineAngle = snap.fineAngle; quarterTurns = snap.quarterTurns; flipH = snap.flipH; flipV = snap.flipV
+        scaleH = snap.scaleH; scaleV = snap.scaleV; centerScale = snap.centerScale
+        filterPreset = snap.filterPreset; filterIntensity = snap.filterIntensity; adjustValues = snap.adjustValues
+        blurOn = snap.blurOn; blurInside = snap.blurInside; blurAmount = snap.blurAmount; blurFeather = snap.blurFeather
+        blurCx = snap.blurCx; blurCy = snap.blurCy; blurR = snap.blurR
+        overlays = snap.overlays
+        bgColor = snap.bgColor; bgGradient = snap.bgGradient; bgBlurPhoto = snap.bgBlurPhoto
+        bgBlur = snap.bgBlur; bgTexture = snap.bgTexture
+        strokes = snap.strokes
+        tools = snap.tools
+        if (activePointId != null && snap.tools.selective.none { it.id == activePointId }) activePointId = null
+        currentStroke = emptyList()
+        if (selectedId != null && snap.overlays.none { it.id == selectedId }) selectedId = null
     }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Edit Photo", fontWeight = FontWeight.Bold) },
+                title = { Text("Photo Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
+                    UndoRedoActions(history)
                     Button(
                         onClick = { showExport = true },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
@@ -658,11 +860,11 @@ fun SinglePhotoEditorScreen(
             Column(Modifier.background(Color.White)) {
                 Box(
                     Modifier.fillMaxWidth().height(240.dp).background(Color(0xFFF8FAFC))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Column(
                         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         when (tool) {
                             // ------------------------------------------------ 1. RESIZE
@@ -758,7 +960,7 @@ fun SinglePhotoEditorScreen(
                                 ) {
                                     Text(
                                         "$adjustItem: ${if (cur > 0 && def.isBipolar) "+" else ""}${cur.toInt()}%",
-                                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
+                                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
                                     )
                                     Text("Reset all", fontSize = 12.sp, color = Color(0xFF2563EB),
                                         modifier = Modifier.clickable { adjustValues = emptyMap() })
@@ -783,6 +985,17 @@ fun SinglePhotoEditorScreen(
                                         SpChip(d.name + if (active) " •" else "", adjustItem == d.name) { adjustItem = d.name }
                                     }
                                 }
+                                if (adjustGroup == "Detail") {
+                                    SpLabel("Details")
+                                    val st = adjustValues["Structure"] ?: 0f
+                                    val sh = adjustValues["Sharpen"] ?: 0f
+                                    SpSliderRow("Structure (mid-tone local contrast): ${if (st > 0) "+" else ""}${st.toInt()}%", st, -50f..50f) {
+                                        adjustValues = adjustValues + ("Structure" to it)
+                                    }
+                                    SpSliderRow("Sharpening (edge definition): ${sh.toInt()}%", sh, 0f..100f) {
+                                        adjustValues = adjustValues + ("Sharpen" to it)
+                                    }
+                                }
                             }
                             // ------------------------------------------------ 5. BLUR + OVERLAY CIRCLE
                             SpTool.BLUR -> {
@@ -802,6 +1015,110 @@ fun SinglePhotoEditorScreen(
                                     SpHint("Drag the circle to move it, pinch or use the corner handle to resize.")
                                 } else {
                                     SpHint("Turn this on to place a circle over the photo. Everything outside it is blurred (or inside, if you flip the mode).")
+                                }
+                            }
+                            // ------------------------------------------------ 5a. SELECTIVE
+                            SpTool.SELECTIVE -> {
+                                val ap = tools.selective.firstOrNull { it.id == activePointId }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    SpChip(if (showPoints) "Hide points" else "Show points", false) { showPoints = !showPoints }
+                                    SpChip("Delete point", false) {
+                                        ap?.let { a ->
+                                            tools = tools.copy(selective = tools.selective.filter { it.id != a.id })
+                                            activePointId = null
+                                        }
+                                    }
+                                    SpChip("Clear all", false) { tools = tools.copy(selective = emptyList()); activePointId = null }
+                                }
+                                SpLabel("Control points: ${tools.selective.size} / $SELECTIVE_MAX_POINTS")
+                                SpHint("Tap the photo to drop a control point, then use the strip on the photo for Brightness, Contrast, Saturation and Structure. Drag a point to move it, pinch anywhere to resize the active circle. The eye hides the circles.")
+                            }
+                            // ------------------------------------------------ 5b. VINTAGE
+                            SpTool.VINTAGE -> {
+                                val v = tools.vintage
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Vintage", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                                    Switch(checked = v.on, onCheckedChange = { on -> setVintage { it.copy(on = on) } })
+                                }
+                                if (v.on) {
+                                    SpLabel("Colour tint")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        VintageTint.entries.forEach { t ->
+                                            SpColorChip(t.label, Color(t.swatch.toInt()), v.tint == t) { setVintage { it.copy(tint = t) } }
+                                        }
+                                    }
+                                    SpSliderRow("Brightness: ${v.brightness.toInt()}", v.brightness, -50f..50f) { x -> setVintage { it.copy(brightness = x) } }
+                                    SpSliderRow("Saturation: ${v.saturation.toInt()}", v.saturation, -50f..50f) { x -> setVintage { it.copy(saturation = x) } }
+                                    SpSliderRow("Style strength: ${v.strength.toInt()}", v.strength, 0f..100f) { x -> setVintage { it.copy(strength = x) } }
+                                    SpSliderRow("Vignette strength: ${v.vignette.toInt()}", v.vignette, 0f..100f) { x -> setVintage { it.copy(vignette = x) } }
+                                    SpChip("Reset", false) { setVintage { VintageState(on = true) } }
+                                } else {
+                                    SpHint("Turn this on for a faded, tinted retro look. Pick a Yellow, Green, Blue or Red tint and tune it.")
+                                }
+                            }
+                            // ------------------------------------------------ 5c. GLAMOUR GLOW
+                            SpTool.GLAMOUR -> {
+                                val g = tools.glamour
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Glamour Glow", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                                    Switch(checked = g.on, onCheckedChange = { on -> setGlamour { it.copy(on = on) } })
+                                }
+                                if (g.on) {
+                                    SpLabel("Presets")
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        items(GlamourPresets.all) { p ->
+                                            val match = g.glow == p.glow && g.saturation == p.saturation && g.warmth == p.warmth
+                                            SpChip(p.name, match) { setGlamour { it.copy(glow = p.glow, saturation = p.saturation, warmth = p.warmth) } }
+                                        }
+                                    }
+                                    SpSliderRow("Glow: ${g.glow.toInt()}", g.glow, 0f..100f) { x -> setGlamour { it.copy(glow = x) } }
+                                    SpSliderRow("Saturation: ${g.saturation.toInt()}", g.saturation, -50f..50f) { x -> setGlamour { it.copy(saturation = x) } }
+                                    SpSliderRow("Warmth: ${g.warmth.toInt()}", g.warmth, -50f..50f) { x -> setGlamour { it.copy(warmth = x) } }
+                                } else {
+                                    SpHint("Adds a soft-focus, dreamy glow. Turn it on and pick a preset or tune Glow, Saturation and Warmth.")
+                                }
+                            }
+                            // ------------------------------------------------ 5d. LENS BLUR
+                            SpTool.LENS -> {
+                                val l = tools.lens
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Lens blur", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                                    Switch(checked = l.on, onCheckedChange = { on -> setLens { it.copy(on = on) } })
+                                }
+                                if (l.on) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        LensBlurMode.entries.forEach { m -> SpChip(m.label, l.mode == m) { setLens { it.copy(mode = m) } } }
+                                    }
+                                    SpSliderRow("Clear zone: ${(l.clear * 100).toInt()}", l.clear * 100f, 4f..60f) { x -> setLens { it.copy(clear = x / 100f) } }
+                                    SpSliderRow("Transition feather: ${(l.feather * 100).toInt()}", l.feather * 100f, 2f..50f) { x -> setLens { it.copy(feather = x / 100f) } }
+                                    SpSliderRow("Blur intensity: ${l.amount.toInt()}", l.amount, 0f..100f) { x -> setLens { it.copy(amount = x) } }
+                                    SpHint("Drag on the photo to move the sharp zone, pinch to resize it.")
+                                } else {
+                                    SpHint("Keeps a circular or horizontal zone sharp and blurs the rest, with a soft transition ring.")
+                                }
+                            }
+                            // ------------------------------------------------ 5e. PERSPECTIVE
+                            SpTool.PERSPECTIVE -> {
+                                val ps = tools.perspective
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(PerspectiveMode.entries) { m -> SpChip(m.label, ps.mode == m) { setPersp { it.copy(mode = m) } } }
+                                }
+                                when (ps.mode) {
+                                    PerspectiveMode.TILT -> {
+                                        SpSliderRow("Vertical tilt: ${ps.tiltV.toInt()}", ps.tiltV, -50f..50f) { x -> setPersp { it.copy(tiltV = x) } }
+                                        SpSliderRow("Horizontal tilt: ${ps.tiltH.toInt()}", ps.tiltH, -50f..50f) { x -> setPersp { it.copy(tiltH = x) } }
+                                    }
+                                    PerspectiveMode.ROTATE ->
+                                        SpSliderRow("Rotate: ${ps.rotate.toInt()}°", ps.rotate, -45f..45f) { x -> setPersp { it.copy(rotate = x) } }
+                                    PerspectiveMode.SCALE ->
+                                        SpSliderRow("Scale: ${ps.scale.toInt()}%", ps.scale, 50f..150f) { x -> setPersp { it.copy(scale = x) } }
+                                    PerspectiveMode.FREE ->
+                                        SpHint("Drag the four corner handles on the photo to bend it freely.")
+                                }
+                                SpLabel("Fill empty areas")
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PerspectiveFill.entries.forEach { f -> SpChip(f.label, ps.fill == f) { setPersp { it.copy(fill = f) } } }
+                                    SpChip("Reset", false) { setPersp { PerspectiveState(mode = it.mode, fill = it.fill) } }
                                 }
                             }
                             // ------------------------------------------------ 6. STICKERS
@@ -834,9 +1151,9 @@ fun SinglePhotoEditorScreen(
                                 val st = selected?.takeIf { it.kind == FreestyleItemKind.TEXT }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically) {
-                                    Text("+ Add Text", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B),
+                                    Text("+ Add Text", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B),
                                         modifier = Modifier.clickable { editingTextId = null; textDialogOpen = true })
-                                    if (st != null) Text("Edit text", fontSize = 13.sp, color = Color(0xFF2563EB),
+                                    if (st != null) Text("Edit text", fontSize = 12.sp, color = Color(0xFF2563EB),
                                         modifier = Modifier.clickable { editingTextId = st.id; textDialogOpen = true })
                                 }
                                 if (st != null) {
@@ -864,7 +1181,7 @@ fun SinglePhotoEditorScreen(
                                     bgColor = it; bgGradient = emptyList(); bgBlurPhoto = false
                                 }
                                 SpLabel("Gradients")
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(SpGradients) { g ->
                                         Box(
                                             Modifier.size(32.dp).clip(CircleShape)
@@ -901,8 +1218,8 @@ fun SinglePhotoEditorScreen(
                 }
                 // ---- tool bar
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     SpTool.entries.forEach { t ->
@@ -914,7 +1231,7 @@ fun SinglePhotoEditorScreen(
                                 .clickable { tool = t; if (t != SpTool.TEXT && t != SpTool.STICKERS) selectedId = null }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Icon(t.icon, null, tint = if (sel) Color(0xFF2563EB) else Color(0xFF64748B), modifier = Modifier.size(20.dp))
+                            Icon(t.icon, null, tint = if (sel) Color(0xFF2563EB) else Color(0xFF64748B), modifier = Modifier.size(18.dp))
                             Spacer(Modifier.height(2.dp))
                             Text(t.label, fontSize = 10.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                                 color = if (sel) Color(0xFF2563EB) else Color(0xFF64748B))
@@ -932,6 +1249,13 @@ fun SinglePhotoEditorScreen(
             val ch = cw / canvasRatio
             val W = canvasSize.width.toFloat()
             val H = canvasSize.height.toFloat()
+            // perspective is the LAST geometric step; Selective / Lens place things in photo space, so the
+            // preview shows the un-warped photo while those two tools are open.
+            val perspMatrix = remember(tools.perspective, W, H) {
+                if (W > 0f && H > 0f) perspectiveMatrix(tools.perspective.quad(W, H), W, H)?.let { Matrix(it) } else null
+            }
+            val perspActive = perspMatrix != null && !tools.perspective.isIdentity && !editingCrop &&
+                    tool != SpTool.SELECTIVE && tool != SpTool.LENS
 
             Box(
                 Modifier
@@ -1029,6 +1353,114 @@ fun SinglePhotoEditorScreen(
                                 return@awaitEachGesture
                             }
 
+                            // ------------------------- selective: tap = new point, drag = move, pinch = resize circle
+                            if (tool == SpTool.SELECTIVE) {
+                                val hitR = 30.dp.toPx()
+                                val g0 = spGeoAt(w, h)
+                                val hitPt = tools.selective
+                                    .map { it to (g0.toCanvas(Offset(it.x, it.y)) - down.position).getDistance() }
+                                    .minByOrNull { it.second }
+                                    ?.takeIf { it.second < hitR }?.first
+                                down.consume()
+                                if (hitPt != null) {
+                                    activePointId = hitPt.id
+                                    do {
+                                        val ev = awaitPointerEvent()
+                                        val zoom = ev.calculateZoom()
+                                        val pan = ev.calculatePan()
+                                        if (zoom != 1f || pan != Offset.Zero) {
+                                            val d = spGeoAt(w, h).panToBox(pan)
+                                            updatePoint(hitPt.id) {
+                                                it.copy(
+                                                    x = (it.x + d.x).coerceIn(0f, 1f),
+                                                    y = (it.y + d.y).coerceIn(0f, 1f),
+                                                    radius = (it.radius * zoom).coerceIn(SELECTIVE_MIN_RADIUS, SELECTIVE_MAX_RADIUS)
+                                                )
+                                            }
+                                            ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                                        }
+                                    } while (ev.changes.any { it.pressed })
+                                } else {
+                                    var moved = false
+                                    var pinched = false
+                                    val slop = viewConfiguration.touchSlop
+                                    do {
+                                        val ev = awaitPointerEvent()
+                                        if (ev.changes.size >= 2) {
+                                            pinched = true
+                                            val zoom = ev.calculateZoom()
+                                            val aid = activePointId
+                                            if (aid != null && zoom != 1f) {
+                                                updatePoint(aid) {
+                                                    it.copy(radius = (it.radius * zoom).coerceIn(SELECTIVE_MIN_RADIUS, SELECTIVE_MAX_RADIUS))
+                                                }
+                                            }
+                                        } else if ((ev.changes[0].position - down.position).getDistance() > slop) moved = true
+                                        ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                                    } while (ev.changes.any { it.pressed })
+                                    if (!moved && !pinched && tools.selective.size < SELECTIVE_MAX_POINTS) {
+                                        val b = spGeoAt(w, h).toBox(down.position)
+                                        if (b.x in 0f..1f && b.y in 0f..1f) {
+                                            pointSeq += 1
+                                            val np = SelectivePoint(id = "pt$pointSeq", x = b.x, y = b.y)
+                                            tools = tools.copy(selective = tools.selective + np)
+                                            activePointId = np.id
+                                        }
+                                    }
+                                }
+                                return@awaitEachGesture
+                            }
+
+                            // ------------------------- lens blur: drag = move the sharp zone, pinch = resize it
+                            if (tool == SpTool.LENS) {
+                                if (!tools.lens.on) return@awaitEachGesture
+                                down.consume()
+                                do {
+                                    val ev = awaitPointerEvent()
+                                    val zoom = ev.calculateZoom()
+                                    val pan = ev.calculatePan()
+                                    if (zoom != 1f || pan != Offset.Zero) {
+                                        val d = spGeoAt(w, h).panToBox(pan)
+                                        setLens {
+                                            it.copy(
+                                                cx = (it.cx + d.x).coerceIn(0f, 1f),
+                                                cy = (it.cy + d.y).coerceIn(0f, 1f),
+                                                clear = (it.clear * zoom).coerceIn(0.04f, 0.6f)
+                                            )
+                                        }
+                                        ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                                    }
+                                } while (ev.changes.any { it.pressed })
+                                return@awaitEachGesture
+                            }
+
+                            // ------------------------- perspective (Free mode): drag the four corner handles
+                            if (tool == SpTool.PERSPECTIVE) {
+                                if (tools.perspective.mode != PerspectiveMode.FREE) return@awaitEachGesture
+                                val base = tools.perspective.quad(w, h, withFree = false)
+                                val cur = tools.perspective.quad(w, h)
+                                var ci = 0
+                                var best = Float.MAX_VALUE
+                                for (i in 0..3) {
+                                    val d = hypot(cur[i * 2] - down.position.x, cur[i * 2 + 1] - down.position.y)
+                                    if (d < best) { best = d; ci = i }
+                                }
+                                if (best > 40.dp.toPx()) return@awaitEachGesture
+                                down.consume()
+                                drag(down.id) { pc ->
+                                    val ox = ((pc.position.x - base[ci * 2]) / w).coerceIn(-0.45f, 0.45f)
+                                    val oy = ((pc.position.y - base[ci * 2 + 1]) / h).coerceIn(-0.45f, 0.45f)
+                                    setPersp { p ->
+                                        val c = p.corners.toMutableList()
+                                        c[ci * 2] = ox
+                                        c[ci * 2 + 1] = oy
+                                        p.copy(corners = c)
+                                    }
+                                    pc.consume()
+                                }
+                                return@awaitEachGesture
+                            }
+
                             // ------------------------- handles of the selected overlay
                             val margin = 16.dp.toPx()
                             val hitR = 26.dp.toPx()
@@ -1098,7 +1530,9 @@ fun SinglePhotoEditorScreen(
                     // ---------------- backdrop
                     when {
                         bgBlurPhoto -> AsyncImage(
-                            model = photoUri, contentDescription = null, contentScale = ContentScale.Crop,
+                            model = rememberPhotoRequest(photoUri, 512),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                                 .blur(with(density) { (bgBlur / 100f * 0.05f * W).toDp() }, BlurredEdgeTreatment.Unbounded)
                         )
@@ -1119,30 +1553,51 @@ fun SinglePhotoEditorScreen(
                                 if (editingCrop) {
                                     SpPhotoLayer(
                                         photoUri, SpCrop(), imgAspect, true, 0, 0f, false, false, 1f, 1f, 1f,
-                                        W, H, photoFilter, vignette
+                                        W, H, photoFilter, vignette,
+                                        matrix = photoMatrix, effects = photoFx
                                     ) { a -> if (abs(a - imgAspect) > 0.001f) imgAspect = a }
                                 } else {
                                     SpPhotoLayer(
                                         photoUri, crop, imgAspect, fit, quarterTurns, fineAngle, flipH, flipV,
-                                        scaleH / 100f, scaleV / 100f, centerScale / 100f, W, H, photoFilter, vignette
+                                        scaleH / 100f, scaleV / 100f, centerScale / 100f, W, H, photoFilter, vignette,
+                                        matrix = photoMatrix, effects = photoFx,
+                                        lens = tools.lens, selective = tools.selective
                                     ) { a -> if (abs(a - imgAspect) > 0.001f) imgAspect = a }
                                 }
                             }
                         }
 
                         val spot = blurOn && !editingCrop
-                        if (!spot) {
-                            photoLayer(false)
-                        } else {
-                            val cx = blurCx * W
-                            val cy = blurCy * H
-                            val rr = blurR * W
-                            if (blurInside) {
+                        // perspective: fill for the empty areas, then the warped photo layer
+                        if (perspActive) {
+                            when (tools.perspective.fill) {
+                                PerspectiveFill.SMART -> AsyncImage(
+                                    model = rememberPhotoRequest(photoUri, 512), contentDescription = null, contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                        .blur(with(density) { (0.05f * W).toDp() }, BlurredEdgeTreatment.Unbounded)
+                                )
+                                PerspectiveFill.WHITE -> Box(Modifier.fillMaxSize().background(Color.White))
+                                PerspectiveFill.BLACK -> Box(Modifier.fillMaxSize().background(Color.Black))
+                            }
+                        }
+                        Box(
+                            Modifier.fillMaxSize().then(
+                                if (perspActive && perspMatrix != null) Modifier.spPerspective(perspMatrix) else Modifier
+                            )
+                        ) {
+                            if (!spot) {
                                 photoLayer(false)
-                                Box(Modifier.fillMaxSize().spCircleMask(cx, cy, rr, blurFeather)) { photoLayer(true) }
                             } else {
-                                photoLayer(true)
-                                Box(Modifier.fillMaxSize().spCircleMask(cx, cy, rr, blurFeather)) { photoLayer(false) }
+                                val cx = blurCx * W
+                                val cy = blurCy * H
+                                val rr = blurR * W
+                                if (blurInside) {
+                                    photoLayer(false)
+                                    Box(Modifier.fillMaxSize().spCircleMask(cx, cy, rr, blurFeather)) { photoLayer(true) }
+                                } else {
+                                    photoLayer(true)
+                                    Box(Modifier.fillMaxSize().spCircleMask(cx, cy, rr, blurFeather)) { photoLayer(false) }
+                                }
                             }
                         }
 
@@ -1187,6 +1642,68 @@ fun SinglePhotoEditorScreen(
                             }
                         }
 
+                        // ---------------- selective control-point circles (the eye button hides them)
+                        if (tool == SpTool.SELECTIVE && showPoints) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                val g = spGeoAt(size.width, size.height)
+                                tools.selective.forEach { p ->
+                                    val c = g.toCanvas(Offset(p.x, p.y))
+                                    val r = p.radius * g.pxPerBoxWidth
+                                    val active = p.id == activePointId
+                                    val ring = if (active) Color(0xFF2563EB) else Color.White
+                                    drawCircle(Color.Black.copy(alpha = 0.35f), r + 1.5f, c, style = Stroke(3.dp.toPx()))
+                                    drawCircle(ring, r, c, style = Stroke(2.dp.toPx()))
+                                    drawCircle(Color.White, 8.dp.toPx(), c)
+                                    drawCircle(
+                                        if (active) Color(0xFF2563EB) else if (p.isNeutral) Color(0xFF94A3B8) else Color(0xFF22C55E),
+                                        5.5.dp.toPx(), c
+                                    )
+                                }
+                            }
+                        }
+
+                        // ---------------- lens blur guide: clear zone (solid) + feather ring (dashed)
+                        if (tool == SpTool.LENS && tools.lens.on) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                val g = spGeoAt(size.width, size.height)
+                                val l = tools.lens
+                                val c = g.toCanvas(Offset(l.cx, l.cy))
+                                val dash = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))
+                                rotate(g.angle, c) {
+                                    fun ring(frac: Float, color: Color, width: Float, effect: PathEffect?) {
+                                        val rx = frac * g.dw * l.axisX * g.sx
+                                        val ry = frac * g.dw * l.axisY * g.sy
+                                        drawOval(
+                                            color, topLeft = Offset(c.x - rx, c.y - ry), size = Size(rx * 2f, ry * 2f),
+                                            style = Stroke(width, pathEffect = effect)
+                                        )
+                                    }
+                                    ring(l.clear, Color.White, 2.dp.toPx(), null)
+                                    ring(l.clear + l.feather, Color.White.copy(alpha = 0.8f), 1.5.dp.toPx(), dash)
+                                }
+                                drawCircle(Color.White, 6.dp.toPx(), c)
+                                drawCircle(Color(0xFF2563EB), 4.dp.toPx(), c)
+                            }
+                        }
+
+                        // ---------------- perspective quad (+ corner handles in Free mode)
+                        if (tool == SpTool.PERSPECTIVE) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                val q = tools.perspective.quad(size.width, size.height)
+                                val path = Path().apply {
+                                    moveTo(q[0], q[1]); lineTo(q[2], q[3]); lineTo(q[4], q[5]); lineTo(q[6], q[7]); close()
+                                }
+                                drawPath(path, Color.White, style = Stroke(2.dp.toPx()))
+                                if (tools.perspective.mode == PerspectiveMode.FREE) {
+                                    for (i in 0..3) {
+                                        val o = Offset(q[i * 2], q[i * 2 + 1])
+                                        drawCircle(Color.White, 10.dp.toPx(), o)
+                                        drawCircle(Color(0xFF2563EB), 7.dp.toPx(), o)
+                                    }
+                                }
+                            }
+                        }
+
                         // ---------------- spotlight circle guide
                         if (tool == SpTool.BLUR && blurOn) {
                             Canvas(Modifier.fillMaxSize()) {
@@ -1211,6 +1728,25 @@ fun SinglePhotoEditorScreen(
                     SpHandle(spHandlePos(s, W, H, -1f, m), Color(0xFFEF4444), Icons.Default.Close, "Delete")
                     SpHandle(spHandlePos(s, W, H, 1f, m), Color(0xFF2563EB), Icons.Default.OpenInFull, "Scale and rotate")
                 }
+            }
+
+            // ---------------- selective tool: eye toggle + popup control strip (outside the gesture surface)
+            if (tool == SpTool.SELECTIVE) {
+                SpSelectiveOverlay(
+                    point = tools.selective.firstOrNull { it.id == activePointId },
+                    param = selParam,
+                    showPoints = showPoints,
+                    onParam = { selParam = it },
+                    onValue = { v -> activePointId?.let { id -> updatePoint(id) { it.withValue(selParam, v) } } },
+                    onDelete = {
+                        val id = activePointId
+                        if (id != null) {
+                            tools = tools.copy(selective = tools.selective.filter { it.id != id })
+                            activePointId = null
+                        }
+                    },
+                    onToggleEye = { showPoints = !showPoints }
+                )
             }
         }
     }
@@ -1259,7 +1795,7 @@ fun SinglePhotoEditorScreen(
             ) {
                 // before saving: the photo being edited; after saving: the real exported file
                 coil3.compose.AsyncImage(
-                    model = photoUri,
+                    model = rememberPhotoRequest(photoUri, 1024),
                     contentDescription = null,
                     contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
@@ -1274,7 +1810,7 @@ fun SinglePhotoEditorScreen(
             onDismissRequest = { if (!isSaving) showExport = false },
             title = { Text("Save photo") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpLabel("Quality")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("HD" to 1080, "2K" to 2048, "4K" to 3840).forEach { (n, px) ->
@@ -1321,9 +1857,97 @@ private fun SpRatioTile(name: String, badge: String, selected: Boolean, onClick:
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            Text(name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 color = if (selected) Color(0xFF1D4ED8) else Color(0xFF1E293B))
             if (badge.isNotEmpty()) Text(badge, fontSize = 9.sp, color = Color(0xFF64748B))
+        }
+    }
+}
+@Composable
+private fun SpColorChip(text: String, swatch: Color, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (selected) Color(0xFF0F172A) else Color(0xFFF1F5F9))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(Modifier.size(14.dp).clip(CircleShape).background(swatch).border(1.dp, Color(0x33000000), CircleShape))
+        Text(
+            text, fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) Color.White else Color(0xFF334155)
+        )
+    }
+}
+
+/**
+ * Floating UI of the Selective tool (sits above the stage, never inside the gesture surface):
+ *  - eye button (top right): show / hide the control-point circles,
+ *  - popup control strip (bottom) for the active point: Brightness / Contrast / Saturation / Structure + delete.
+ */
+@Composable
+private fun SpSelectiveOverlay(
+    point: SelectivePoint?,
+    param: SelParam,
+    showPoints: Boolean,
+    onParam: (SelParam) -> Unit,
+    onValue: (Float) -> Unit,
+    onDelete: () -> Unit,
+    onToggleEye: () -> Unit
+) {
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(6.dp).size(40.dp).clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.92f))
+                .clickable(onClick = onToggleEye),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                if (showPoints) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                contentDescription = if (showPoints) "Hide control points" else "Show control points",
+                tint = Color(0xFF0F172A)
+            )
+        }
+        if (point != null) {
+            Card(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp).fillMaxWidth(0.96f),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.95f)),
+                elevation = CardDefaults.cardElevation(6.dp)
+            ) {
+                Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        SelParam.entries.forEach { sp ->
+                            val sel = sp == param
+                            val edited = kotlin.math.abs(point.valueOf(sp)) >= 0.5f
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                                    .background(if (sel) Color(0xFFEFF6FF) else Color.Transparent)
+                                    .clickable { onParam(sp) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(sp.icon, null, modifier = Modifier.size(18.dp),
+                                    tint = if (sel) Color(0xFF2563EB) else if (edited) Color(0xFF16A34A) else Color(0xFF64748B))
+                                Text(sp.label, fontSize = 9.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (sel) Color(0xFF2563EB) else Color(0xFF64748B))
+                            }
+                        }
+                        IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Delete, "Delete point", tint = Color(0xFFEF4444))
+                        }
+                    }
+                    val v = point.valueOf(param)
+                    Text("${param.label}: ${if (v > 0f) "+" else ""}${v.toInt()}", fontSize = 11.sp, color = Color(0xFF334155))
+                    FluidSlider(
+                        value = v, onValueChange = onValue, valueRange = -50f..50f,
+                        modifier = Modifier.fillMaxWidth().height(32.dp)
+                    )
+                }
+            }
         }
     }
 }

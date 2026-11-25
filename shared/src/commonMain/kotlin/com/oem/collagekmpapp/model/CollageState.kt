@@ -64,6 +64,8 @@ data class LayoutTemplate(
 )
 
 sealed class Screen {
+    object Splash : Screen()
+    object Onboarding : Screen()
     object HomeContainer : Screen()
     object Home : Screen()
     object Settings : Screen()

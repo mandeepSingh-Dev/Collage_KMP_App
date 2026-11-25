@@ -1,5 +1,15 @@
 package com.oem.collagekmpapp.ui
 
+import com.oem.collagekmpapp.BackgroundTexture
+import com.oem.collagekmpapp.FreestyleRenderer
+import com.oem.collagekmpapp.PerspectiveFill
+import com.oem.collagekmpapp.PhotoColorEngine
+import com.oem.collagekmpapp.PhotoLook
+import com.oem.collagekmpapp.exportFormatSpec
+import com.oem.collagekmpapp.withExportWatermark
+
+
+
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -22,10 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import com.oem.collagekmpapp.BackgroundTexture
-import com.oem.collagekmpapp.FreestyleRenderer
-import com.oem.collagekmpapp.PhotoColorEngine
-import com.oem.collagekmpapp.PhotoLook
+import com.oem.collagekmpapp.ui.SinglePhotoExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,6 +41,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
+// androidMain
 @Composable
 actual fun rememberSinglePhotoExporter(): SinglePhotoExporter {
     val context = LocalContext.current
@@ -97,7 +105,7 @@ private fun render(context: Context, edit: SinglePhotoEdit, target: Int): Bitmap
     val bgBmp = edit.project.backgroundPhotoUri?.let { decodeUpright(context, Uri.parse(it), max(ew, eh)) }
     FreestyleRenderer.draw(
         canvas, edit.project.copy(items = emptyList(), drawStrokes = emptyList()),
-        ew, eh, emptyMap<String, Bitmap>(), bgBmp
+        ew, eh, emptyMap(), bgBmp
     )
     bgBmp?.recycle()
 
@@ -119,8 +127,8 @@ private fun render(context: Context, edit: SinglePhotoEdit, target: Int): Bitmap
         val (dw, dh) = boxSize(cw, chh, a, odd, edit.fit, w, h)
         val fullW = dw / cw
         val fullH = dh / chh
-        val colorMatrix = PhotoColorEngine.buildMatrix(edit.filterPreset, edit.filterIntensity, edit.adjustValues)
-        val fx = PhotoColorEngine.effects(edit.filterPreset, edit.filterIntensity, edit.adjustValues)
+        val colorMatrix = PhotoColorEngine.buildMatrix(edit.filterPreset, edit.filterIntensity, edit.adjustValues, edit.tools)
+        val fx = PhotoColorEngine.effects(edit.filterPreset, edit.filterIntensity, edit.adjustValues, edit.tools)
         val exportScale = (w / 1080f).coerceAtLeast(1f)
 
         fun drawPhotoOn(c: Canvas) {
@@ -136,35 +144,56 @@ private fun render(context: Context, edit: SinglePhotoEdit, target: Int): Bitmap
             val left = box.left - cl * fullW
             val top = box.top - ct * fullH
             val dest = RectF(left, top, left + fullW, top + fullH)
-            PhotoLook.drawPhoto(c, photo, dest, box, 1f, colorMatrix, fx, exportScale)
+            PhotoLook.drawPhoto(c, photo, dest, box, 1f, colorMatrix, fx, exportScale, edit.tools.lens, edit.tools.selective)
             PhotoLook.drawVignette(c, box, fx.vignette)
             c.restore()
         }
 
-        if (!edit.blurOn) {
-            drawPhotoOn(canvas)
+        // spotlight blur included: everything that makes up the edited photo, painted onto [target]
+        fun paintPhotoStack(target: Canvas) {
+            if (!edit.blurOn) {
+                drawPhotoOn(target)
+            } else {
+                val layer = Bitmap.createBitmap(ew, eh, Bitmap.Config.ARGB_8888)
+                drawPhotoOn(Canvas(layer))
+                val blurred = gaussianBlur(layer, edit.blurAmount * 0.04f * w)
+                val base = if (edit.blurInside) layer else blurred
+                val top = if (edit.blurInside) blurred else layer
+
+                // keep only the soft-edged disc of the top layer
+                val inner = (1f - edit.blurFeather).coerceIn(0f, 0.97f)
+                val mask = Paint().apply {
+                    xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+                    shader = RadialGradient(
+                        edit.blurCx * w, edit.blurCy * h, (edit.blurR * w).coerceAtLeast(1f),
+                        intArrayOf(Color.BLACK, Color.BLACK, Color.TRANSPARENT),
+                        floatArrayOf(0f, inner, 1f), Shader.TileMode.CLAMP
+                    )
+                }
+                Canvas(top).drawRect(0f, 0f, w, h, mask)
+                target.drawBitmap(base, 0f, 0f, null)
+                target.drawBitmap(top, 0f, 0f, null)
+                layer.recycle()
+                blurred.recycle()
+            }
+        }
+
+        // Perspective is the last geometric step: the whole photo layer is warped, the gaps get the chosen fill.
+        val persp = edit.tools.perspective
+        if (persp.isIdentity) {
+            paintPhotoStack(canvas)
         } else {
             val layer = Bitmap.createBitmap(ew, eh, Bitmap.Config.ARGB_8888)
-            drawPhotoOn(Canvas(layer))
-            val blurred = gaussianBlur(layer, edit.blurAmount * 0.04f * w)
-            val base = if (edit.blurInside) layer else blurred
-            val top = if (edit.blurInside) blurred else layer
-
-            // keep only the soft-edged disc of the top layer
-            val inner = (1f - edit.blurFeather).coerceIn(0f, 0.97f)
-            val mask = Paint().apply {
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
-                shader = RadialGradient(
-                    edit.blurCx * w, edit.blurCy * h, (edit.blurR * w).coerceAtLeast(1f),
-                    intArrayOf(Color.BLACK, Color.BLACK, Color.TRANSPARENT),
-                    floatArrayOf(0f, inner, 1f), Shader.TileMode.CLAMP
-                )
+            paintPhotoStack(Canvas(layer))
+            when (persp.fill) {
+                PerspectiveFill.WHITE -> canvas.drawColor(Color.WHITE)
+                PerspectiveFill.BLACK -> canvas.drawColor(Color.BLACK)
+                PerspectiveFill.SMART -> drawSmartFill(canvas, photo, ew, eh)
             }
-            Canvas(top).drawRect(0f, 0f, w, h, mask)
-            canvas.drawBitmap(base, 0f, 0f, null)
-            canvas.drawBitmap(top, 0f, 0f, null)
+            val warp = Matrix()
+            warp.setPolyToPoly(floatArrayOf(0f, 0f, w, 0f, w, h, 0f, h), 0, persp.quad(w, h), 0, 4)
+            canvas.drawBitmap(layer, warp, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
             layer.recycle()
-            blurred.recycle()
         }
     } finally {
         photo.recycle()
@@ -179,9 +208,27 @@ private fun render(context: Context, edit: SinglePhotoEdit, target: Int): Bitmap
             backgroundPhotoUri = null,
             backgroundTexture = BackgroundTexture.NONE
         ),
-        ew, eh, emptyMap<String, Bitmap>(), null
+        ew, eh, emptyMap(), null
     )
     return result
+}
+
+// ------------------------------------------------------------------------------------ perspective fill
+
+/** "Smart" fill: the photo itself, scaled to cover the canvas and heavily blurred (same look as the preview). */
+private fun drawSmartFill(canvas: Canvas, photo: Bitmap, ew: Int, eh: Int) {
+    val sw = max(16, ew / 4)
+    val sh = max(16, eh / 4)
+    val small = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888)
+    val c = Canvas(small)
+    val k = max(sw.toFloat() / photo.width, sh.toFloat() / photo.height)
+    val dw = photo.width * k
+    val dh = photo.height * k
+    c.drawBitmap(photo, null, RectF((sw - dw) / 2f, (sh - dh) / 2f, (sw + dw) / 2f, (sh + dh) / 2f), Paint(Paint.FILTER_BITMAP_FLAG))
+    val blurred = gaussianBlur(small, 0.05f * sw)
+    canvas.drawBitmap(blurred, null, RectF(0f, 0f, ew.toFloat(), eh.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG))
+    blurred.recycle()
+    small.recycle()
 }
 
 // ------------------------------------------------------------------------------------ blur
@@ -299,12 +346,13 @@ private fun decodeUpright(context: Context, uri: Uri, need: Int): Bitmap? {
     return rotated
 }
 
-private fun saveBitmap(context: Context, bitmap: Bitmap, format: String): Boolean {
-    val png = format.equals("PNG", ignoreCase = true)
+private fun saveBitmap(context: Context, rawBitmap: Bitmap, format: String): Boolean {
+    val spec = exportFormatSpec(format)          // JPG / PNG / WEBP from Settings
+    val bitmap = rawBitmap.withExportWatermark() // optional watermark from Settings
     val resolver = context.contentResolver
     val values = ContentValues().apply {
-        put(MediaStore.MediaColumns.DISPLAY_NAME, "Edit_${System.currentTimeMillis()}.${if (png) "png" else "jpg"}")
-        put(MediaStore.MediaColumns.MIME_TYPE, if (png) "image/png" else "image/jpeg")
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "Edit_${System.currentTimeMillis()}.${spec.ext}")
+        put(MediaStore.MediaColumns.MIME_TYPE, spec.mime)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/CollageStudio")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -312,7 +360,7 @@ private fun saveBitmap(context: Context, bitmap: Bitmap, format: String): Boolea
     }
     val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
     resolver.openOutputStream(uri)?.use { out ->
-        bitmap.compress(if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, if (png) 100 else 95, out)
+        bitmap.compress(spec.compress, spec.quality, out)
         out.flush()
     } ?: return false
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

@@ -13,7 +13,6 @@ import com.oem.collagekmpapp.ui.RemoveBackgroundScreen
 import com.oem.collagekmpapp.ui.SettingsScreen
 import com.oem.collagekmpapp.ui.SinglePhotoEditorScreen
 import com.oem.collagekmpapp.ui.HomeContainer
-
 @Composable
 @Preview
 fun App() {
@@ -23,7 +22,7 @@ fun App() {
         remember(keyValueStore) { AppSettings.attach(keyValueStore); true }
 
         var selectedSavePath by remember { mutableStateOf("/Pictures/CollageStudio") }
-        val backStack = remember { mutableStateListOf<Screen>(Screen.HomeContainer) }
+        val backStack = remember { mutableStateListOf<Screen>(Screen.Splash) }
         val currentScreen = backStack.lastOrNull() ?: Screen.HomeContainer
 
         BackHandler(enabled = backStack.size > 1) {
@@ -31,6 +30,25 @@ fun App() {
         }
 
         when (val screen = currentScreen) {
+            is Screen.Splash -> {
+                SplashScreen(
+                    onFinished = {
+                        // first launch -> onboarding, afterwards straight to the home container
+                        val seen = keyValueStore.getString(ONBOARDING_DONE_KEY, "0") == "1"
+                        backStack.clear()
+                        backStack.add(if (seen) Screen.HomeContainer else Screen.Onboarding)
+                    }
+                )
+            }
+            is Screen.Onboarding -> {
+                OnboardingScreen(
+                    onFinished = {
+                        keyValueStore.putString(ONBOARDING_DONE_KEY, "1")
+                        backStack.clear()
+                        backStack.add(Screen.HomeContainer)
+                    }
+                )
+            }
             is Screen.HomeContainer -> {
                 HomeContainer(
                     selectedSavePath = selectedSavePath,

@@ -1,8 +1,8 @@
-package com.oem.collagekmpapp
+package com.oem.collagekmpapp.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import com.oem.collagekmpapp.ui.SinglePhotoExporter
+
 
 // iosMain (only add this file if you have an iOS target)
 @Composable

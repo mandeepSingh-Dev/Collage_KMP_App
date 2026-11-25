@@ -13,6 +13,8 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -50,10 +52,47 @@ object PhotoLook {
         zoom: Float,
         matrix: FloatArray?,
         fx: PhotoEffects,
-        exportScale: Float
+        exportScale: Float,
+        lens: LensBlurState? = null,                       // Lens Blur, normalised over slotRect
+        selective: List<SelectivePoint> = emptyList()      // Selective-edit control points, normalised over slotRect
+    ) {
+        val lensSpec = lens?.takeIf { it.active }
+        if (lensSpec == null) {
+            drawStack(canvas, bitmap, dest, slotRect, zoom, matrix, fx, selective)
+        } else {
+            // Render the fully processed stack into a slot-sized layer, then composite the sharp layer and a
+            // blurred, masked copy of the same layer (mirrors FilteredPhoto's double stack).
+            val bw = ceil(slotRect.width()).toInt().coerceAtLeast(2)
+            val bh = ceil(slotRect.height()).toInt().coerceAtLeast(2)
+            val layer = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            val lc = Canvas(layer)
+            lc.translate(-slotRect.left, -slotRect.top)
+            drawStack(lc, bitmap, dest, slotRect, zoom, matrix, fx, selective)
+            canvas.drawBitmap(layer, null, slotRect, Paint(Paint.FILTER_BITMAP_FLAG))
+            val blurred = blur(layer, EffectRadii.LENS * (lensSpec.amount / 100f) * slotRect.width() * zoom)
+            drawLensBlurred(canvas, blurred, slotRect, lensSpec)
+            blurred.recycle()
+            layer.recycle()
+        }
+
+        // 6. film grain
+        if (fx.grain > 0.01f) drawGrain(canvas, dest, fx.grain, exportScale)
+    }
+
+    /** Steps 1-5 (+ structure, glamour, selective): everything that touches the photo pixels. */
+    private fun drawStack(
+        canvas: Canvas,
+        bitmap: Bitmap,
+        dest: RectF,
+        slotRect: RectF,
+        zoom: Float,
+        matrix: FloatArray?,
+        fx: PhotoEffects,
+        selective: List<SelectivePoint>
     ) {
         val slotW = slotRect.width()
-        val work: Bitmap? = if (fx.hasSpatial) workBitmap(bitmap, dest) else null
+        val needWork = fx.hasSpatial || selective.any { abs(it.structure) >= 0.5f }
+        val work: Bitmap? = if (needWork) workBitmap(bitmap, dest) else null
         val toWork = if (work != null) work.width / dest.width() else 1f
         fun blurred(frac: Float): Bitmap = blur(work!!, frac * slotW * zoom * toWork)
 
@@ -98,10 +137,98 @@ object PhotoLook {
             b.recycle()
         }
 
-        // 6. film grain
-        if (fx.grain > 0.01f) drawGrain(canvas, dest, fx.grain, exportScale)
+        // 5a. structure: mid-tone local contrast (mid-radius high-pass overlay); negative = smoother
+        if (fx.structure > 0.01f) {
+            val b = blurred(EffectRadii.STRUCTURE)
+            highPass(canvas, bitmap, b, dest, matrix, fx.structure)
+            b.recycle()
+        } else if (fx.structure < -0.01f) {
+            val b = blurred(EffectRadii.STRUCTURE * 2f)
+            canvas.drawBitmap(b, null, dest, gradePaint(matrix, (-fx.structure * 0.6f * 255f).toInt()))
+            b.recycle()
+        }
+
+        // 5b. glamour glow: soft-focus blend + screen bloom of a heavily blurred copy
+        if (fx.glamour > 0.01f) {
+            val b = blurred(EffectRadii.GLAMOUR)
+            canvas.drawBitmap(b, null, dest, gradePaint(matrix, (fx.glamour * 0.45f * 255f).toInt()))
+            canvas.drawBitmap(b, null, dest, gradePaint(matrix, (fx.glamour * 0.5f * 255f).toInt(), PorterDuff.Mode.SCREEN))
+            b.recycle()
+        }
+
+        // 5c. selective edit control points
+        for (p in selective) if (!p.isNeutral) drawSelective(canvas, bitmap, dest, slotRect, zoom, matrix, p, work, toWork)
 
         if (work != null && work !== bitmap) work.recycle()
+    }
+
+    /** One control point: locally graded copy of the photo (+ structure) inside a soft circular mask. */
+    private fun drawSelective(
+        canvas: Canvas,
+        bitmap: Bitmap,
+        dest: RectF,
+        slotRect: RectF,
+        zoom: Float,
+        baseMatrix: FloatArray?,
+        p: SelectivePoint,
+        work: Bitmap?,
+        toWork: Float
+    ) {
+        val cx = slotRect.left + p.x * slotRect.width()
+        val cy = slotRect.top + p.y * slotRect.height()
+        val r = (p.radius * slotRect.width()).coerceAtLeast(1f)
+        val bounds = RectF(cx - r, cy - r, cx + r, cy + r)
+        if (!bounds.intersect(RectF(canvas.clipBounds))) return
+        val pm = PhotoColorEngine.selectiveMatrix(baseMatrix, p)
+
+        val save = canvas.saveLayer(bounds, null)
+        canvas.drawBitmap(bitmap, null, dest, gradePaint(pm))
+        if (work != null && p.structure >= 0.5f) {
+            val b = blur(work, EffectRadii.STRUCTURE * slotRect.width() * zoom * toWork)
+            highPass(canvas, bitmap, b, dest, pm, p.structure / 50f)
+            b.recycle()
+        } else if (work != null && p.structure <= -0.5f) {
+            val b = blur(work, EffectRadii.CLARITY * slotRect.width() * zoom * toWork)
+            canvas.drawBitmap(b, null, dest, gradePaint(pm, (-p.structure / 50f * 0.7f * 255f).toInt()))
+            b.recycle()
+        }
+        val mask = Paint().apply {
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+            shader = RadialGradient(
+                cx, cy, r,
+                intArrayOf(Color.BLACK, Color.BLACK, Color.TRANSPARENT),
+                floatArrayOf(0f, 0.35f, 1f), Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawRect(bounds, mask)
+        canvas.restoreToCount(save)
+    }
+
+    /** Blurred copy of the processed stack, visible only outside the clear zone / across the feather ring. */
+    private fun drawLensBlurred(canvas: Canvas, blurred: Bitmap, rect: RectF, l: LensBlurState) {
+        val cx = rect.left + l.cx * rect.width()
+        val cy = rect.top + l.cy * rect.height()
+        val total = (l.clear + l.feather).coerceAtLeast(0.001f)
+        val rx = (total * rect.width() * l.axisX).coerceAtLeast(1f)
+        val k = l.axisY / l.axisX
+        val inner = (l.clear / total).coerceIn(0f, 0.99f)
+
+        val save = canvas.saveLayer(rect, null)
+        canvas.drawBitmap(blurred, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
+        val mask = Paint().apply {
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+            shader = RadialGradient(
+                cx, cy, rx,
+                intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.BLACK),
+                floatArrayOf(0f, inner, 1f), Shader.TileMode.CLAMP
+            )
+        }
+        canvas.save()
+        canvas.scale(1f, k, cx, cy)                       // circle -> ellipse for Horizontal mode
+        val big = max(rect.width(), rect.height()) * 4f   // DST_IN only touches what is drawn: cover the whole layer
+        canvas.drawRect(rect.left - big, cy - big, rect.right + big, cy + big, mask)
+        canvas.restore()
+        canvas.restoreToCount(save)
     }
 
     /** Public gaussian-style blur (sigma ~ radius px) for other renderers (e.g. Freestyle background). Returns a NEW bitmap. */

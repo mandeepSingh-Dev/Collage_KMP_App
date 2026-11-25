@@ -1,6 +1,7 @@
 package com.oem.collagekmpapp.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -27,11 +28,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -40,6 +43,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -56,6 +60,22 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 // commonMain/kotlin/com/oem/collagekmpapp/ui/CreationsScreen.kt
+
+// Neumorphic palette: a soft blue-grey screen with slightly lighter, raised cards.
+private val NeuBg = Color(0xFFEEF1F6)
+private val NeuCard = Color(0xFFF5F7FA)
+
+/** Raised neumorphic surface: soft ambient + spot shadow and a faint light edge on the top-left. */
+private fun Modifier.neuRaised(shape: Shape, elevation: Dp = 4.dp): Modifier = this
+    .shadow(
+        elevation = elevation, shape = shape,
+        ambientColor = Color(0xFFCBD5E1), spotColor = Color(0xFF94A3B8)
+    )
+    .border(
+        1.dp,
+        Brush.linearGradient(listOf(Color.White, Color(0x00FFFFFF), Color(0x33CBD5E1))),
+        shape
+    )
 
 private enum class CreationFilter(val label: String, val kind: CreationKind?) {
     ALL("All", null),
@@ -146,12 +166,12 @@ fun CreationsScreen(
     LaunchedEffect(searching) { if (searching) searchFocus.requestFocus() }
 
     Scaffold(
-        containerColor = Color(0xFFF8FAFC),
+        containerColor = NeuBg,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            Column(Modifier.background(Color(0xFFF8FAFC))) {
+            Column(Modifier.background(NeuBg)) {
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFF8FAFC)),
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = NeuBg),
                     navigationIcon = {
                         if (searching) {
                             IconButton(onClick = { searching = false; query = "" }) {
@@ -175,7 +195,15 @@ fun CreationsScreen(
                                 modifier = Modifier.fillMaxWidth().focusRequester(searchFocus)
                             )
                         } else {
-                            Text("My Creations", fontWeight = FontWeight.ExtraBold, color = Color(0xFF1E293B))
+                            Column {
+                                Text("My Creations", fontSize = 21.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B), letterSpacing = (-0.3).sp)
+                                if (items.isNotEmpty()) {
+                                    Text(
+                                        if (items.size == 1) "1 creation" else "${items.size} creations",
+                                        fontSize = 11.sp, color = Color(0xFF94A3B8)
+                                    )
+                                }
+                            }
                         }
                     },
                     actions = {
@@ -206,18 +234,15 @@ fun CreationsScreen(
                     }
                 )
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     CreationFilter.entries.forEach { f ->
                         val count = if (f.kind == null) items.size else items.count { it.kind == f.kind }
-                        FilterChip(
+                        MinimalFilterPill(
+                            label = if (items.isEmpty()) f.label else "${f.label} · $count",
                             selected = filter == f,
-                            onClick = { filter = f },
-                            label = { Text(if (items.isEmpty()) f.label else "${f.label} · $count") },
-                            leadingIcon = if (filter == f) {
-                                { Icon(Icons.Default.Check, null, Modifier.size(FilterChipDefaults.IconSize)) }
-                            } else null
+                            onClick = { filter = f }
                         )
                     }
                 }
@@ -247,14 +272,19 @@ fun CreationsScreen(
                 )
 
                 else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 108.dp),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    columns = GridCells.Adaptive(minSize = 150.dp),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(visible, key = { it.id }) { c ->
-                        CreationThumb(c, onClick = { sheetFor = c })
+                        CreationCard(
+                            c,
+                            onClick = { sheetFor = c },
+                            onShare = { sharer.shareToApp("More", c.uri) },
+                            onDelete = { deleteTarget = c }
+                        )
                     }
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         BrandSignatureFooter()
@@ -266,19 +296,24 @@ fun CreationsScreen(
 
     // ============================================================ actions sheet
     sheetFor?.let { c ->
-        ModalBottomSheet(onDismissRequest = { sheetFor = null }) {
-            Column(Modifier.padding(bottom = 24.dp)) {
+        ModalBottomSheet(
+            onDismissRequest = { sheetFor = null },
+            containerColor = NeuCard,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            tonalElevation = 0.dp
+        ) {
+            Column(Modifier.padding(bottom = 16.dp)) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(
                         model = c.uri, contentDescription = null, contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFE2E8F0))
+                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFE2E8F0))
                     )
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(c.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(c.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             listOfNotNull(
                                 c.kind.label,
@@ -286,11 +321,11 @@ fun CreationsScreen(
                                 formatSize(c.sizeBytes).ifEmpty { null },
                                 if (c.width > 0 && c.height > 0) "${c.width}×${c.height}" else null
                             ).joinToString(" · "),
-                            fontSize = 12.sp, color = Color(0xFF64748B)
+                            fontSize = 11.sp, color = Color(0xFF64748B)
                         )
                     }
                 }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(Modifier.padding(vertical = 8.dp), thickness = 0.5.dp, color = Color(0xFFE5E7EB))
                 SheetAction(Icons.Default.Fullscreen, "View full screen") {
                     sheetFor = null; viewerStartId = c.id
                 }
@@ -361,8 +396,8 @@ private fun CreationThumb(creation: Creation, onClick: () -> Unit) {
     Box(
         Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFFE2E8F0))
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFFF1F1F1))
             .clickable(onClick = onClick)
     ) {
         SubcomposeAsyncImage(
@@ -383,16 +418,94 @@ private fun CreationThumb(creation: Creation, onClick: () -> Unit) {
         )
         Box(
             Modifier.align(Alignment.BottomStart).padding(6.dp)
-                .size(22.dp).clip(CircleShape).background(Color(0x99000000)),
+                .size(20.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.88f)),
             contentAlignment = Alignment.Center
-        ) { Icon(creation.kind.icon(), creation.kind.label, tint = Color.White, modifier = Modifier.size(12.dp)) }
+        ) { Icon(creation.kind.icon(), creation.kind.label, tint = Color(0xFF374151), modifier = Modifier.size(11.dp)) }
     }
+}
+
+/**
+ * Neumorphic creation card: raised rounded container, thumbnail, name, date + size badge and share / delete buttons.
+ * Tapping the card opens the actions sheet (same as before); share and delete call the same handlers.
+ */
+@Composable
+private fun CreationCard(creation: Creation, onClick: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit) {
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .neuRaised(shape, 4.dp)
+            .clip(shape)
+            .background(NeuCard)
+            .clickable(onClick = onClick)
+            .padding(10.dp)
+    ) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(1f)
+                .clip(RoundedCornerShape(14.dp)).background(Color(0xFFE2E8F0))
+        ) {
+            SubcomposeAsyncImage(
+                model = creation.uri,
+                contentDescription = creation.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                loading = {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF94A3B8))
+                    }
+                },
+                error = {
+                    Box(Modifier.fillMaxSize().background(Color(0xFFFEE2E2)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.BrokenImage, "Couldn't load", tint = Color(0xFFEF4444))
+                    }
+                }
+            )
+            Box(
+                Modifier.align(Alignment.TopStart).padding(6.dp)
+                    .size(20.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.9f)),
+                contentAlignment = Alignment.Center
+            ) { Icon(creation.kind.icon(), creation.kind.label, tint = Color(0xFF475569), modifier = Modifier.size(11.dp)) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            creation.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B),
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                formatDate(creation.dateMillis).ifEmpty { creation.kind.label },
+                fontSize = 10.sp, color = Color(0xFF94A3B8), maxLines = 1, modifier = Modifier.weight(1f)
+            )
+            formatSize(creation.sizeBytes).ifEmpty { null }?.let { size ->
+                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFE2E8F0)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text(size, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = Color(0xFF64748B), maxLines = 1)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            NeuIconAction(Icons.Default.Share, "Share", Color(0xFF2563EB), onShare)
+            Spacer(Modifier.width(10.dp))
+            NeuIconAction(Icons.Default.Delete, "Delete", Color(0xFFDC2626), onDelete)
+        }
+    }
+}
+
+/** Small raised round icon button. */
+@Composable
+private fun NeuIconAction(icon: ImageVector, description: String, tint: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.size(30.dp).neuRaised(CircleShape, 3.dp).clip(CircleShape).background(NeuCard).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Icon(icon, description, tint = tint, modifier = Modifier.size(15.dp)) }
 }
 
 @Composable
 private fun SheetAction(icon: ImageVector, label: String, tint: Color = Color(0xFF1E293B), onClick: () -> Unit) {
     ListItem(
-        headlineContent = { Text(label, color = tint, fontWeight = FontWeight.Medium) },
+        headlineContent = { Text(label, fontSize = 14.sp, color = tint, fontWeight = FontWeight.Medium) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = { Icon(icon, null, tint = tint) },
         modifier = Modifier.clickable(onClick = onClick)
     )
@@ -401,33 +514,49 @@ private fun SheetAction(icon: ImageVector, label: String, tint: Color = Color(0x
 @Composable
 private fun EmptyCreationsState(onCreate: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().padding(32.dp),
+        Modifier.fillMaxSize().padding(40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
-            Modifier.size(120.dp).clip(CircleShape)
-                .background(Brush.linearGradient(listOf(Color(0xFFDBEAFE), Color(0xFFF3E8FF)))),
+            Modifier.size(96.dp).neuRaised(CircleShape, 6.dp).clip(CircleShape).background(NeuCard),
             contentAlignment = Alignment.Center
-        ) { Icon(Icons.Default.AutoAwesome, null, tint = Color(0xFF2563EB), modifier = Modifier.size(56.dp)) }
-        Spacer(Modifier.height(24.dp))
-        Text("No creations yet", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1E293B))
+        ) { Icon(Icons.Default.AddPhotoAlternate, null, tint = Color(0xFF9CA3AF), modifier = Modifier.size(36.dp)) }
+        Spacer(Modifier.height(28.dp))
+        Text("No creations yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
         Spacer(Modifier.height(8.dp))
         Text(
-            "Collages, freestyle designs and edited photos you save will show up here.",
-            textAlign = TextAlign.Center, color = Color(0xFF64748B), fontSize = 14.sp
+            "Start your first collage.",
+            textAlign = TextAlign.Center, color = Color(0xFF94A3B8), fontSize = 13.sp
         )
         Spacer(Modifier.height(28.dp))
-        Button(
-            onClick = onCreate,
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-            modifier = Modifier.height(50.dp)
+        Box(
+            Modifier.height(44.dp).neuRaised(RoundedCornerShape(22.dp), 4.dp).clip(RoundedCornerShape(22.dp))
+                .background(NeuCard).clickable(onClick = onCreate).padding(horizontal = 28.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Add, null)
-            Spacer(Modifier.width(8.dp))
-            Text("Create Collage", fontWeight = FontWeight.Bold)
+            Text("Create Collage", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2563EB))
         }
+    }
+}
+
+/** Flat text pill: filled dark when selected, plain grey text otherwise. */
+@Composable
+private fun MinimalFilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        Modifier
+            .then(if (selected) Modifier else Modifier.neuRaised(shape, 3.dp))
+            .clip(shape)
+            .background(if (selected) Color(0xFFE2E8F0) else NeuCard)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            label, fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) Color(0xFF2563EB) else Color(0xFF64748B)
+        )
     }
 }
 
@@ -438,13 +567,13 @@ private fun MessageState(icon: ImageVector, title: String, body: String, actionL
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(icon, null, tint = Color(0xFF94A3B8), modifier = Modifier.size(56.dp))
+        Icon(icon, null, tint = Color(0xFFD1D5DB), modifier = Modifier.size(48.dp))
         Spacer(Modifier.height(12.dp))
-        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
         Spacer(Modifier.height(4.dp))
-        Text(body, textAlign = TextAlign.Center, color = Color(0xFF64748B), fontSize = 14.sp)
-        Spacer(Modifier.height(16.dp))
-        OutlinedButton(onClick = onAction) { Text(actionLabel) }
+        Text(body, textAlign = TextAlign.Center, color = Color(0xFF64748B), fontSize = 13.sp)
+        Spacer(Modifier.height(12.dp))
+        TextButton(onClick = onAction) { Text(actionLabel, fontSize = 13.sp, color = Color(0xFF2563EB), fontWeight = FontWeight.SemiBold) }
     }
 }
 

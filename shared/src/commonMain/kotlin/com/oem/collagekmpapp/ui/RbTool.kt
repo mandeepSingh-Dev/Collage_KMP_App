@@ -40,9 +40,11 @@ import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.BgMaskStroke
 import com.oem.collagekmpapp.USE_LEGACY_EXPORT_DIALOG
+import com.oem.collagekmpapp.UndoRedoActions
 import com.oem.collagekmpapp.UnifiedExportScreen
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberBackgroundRemovalExporter
+import com.oem.collagekmpapp.rememberEditHistory
 import kotlinx.coroutines.launch
 
 private enum class RbTool { ERASER, BRUSH }
@@ -186,6 +188,16 @@ fun RemoveBackgroundScreen(
         redoStack = emptyList()
     }
 
+    // ---------------------------------------------------------------- Undo / Redo
+    // History of the complete mask-stroke list: covers eraser strokes, brush (restore) strokes,
+    // "Erase all", "Restore all" and "Reset", each as its own step.
+    val history = rememberEditHistory(current = strokes, debounceMs = 0L) { snap ->
+        strokes = snap
+        redoStack = emptyList()
+        current = emptyList()
+        cursor = null
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -193,8 +205,8 @@ fun RemoveBackgroundScreen(
                 title = { Text("Remove Background", fontWeight = FontWeight.Bold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onClick = { undo() }, enabled = strokes.isNotEmpty()) { Icon(Icons.Default.Undo, "Undo") }
-                    IconButton(onClick = { redo() }, enabled = redoStack.isNotEmpty()) { Icon(Icons.Default.Redo, "Redo") }
+                    UndoRedoActions(history)
+                    // (legacy per-screen undo()/redo() above are superseded by the shared history buttons)
                     Button(
                         enabled = !isSaving,
                         onClick = {
@@ -358,8 +370,7 @@ fun RemoveBackgroundScreen(
             onDismissRequest = { showExport = false },
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false
-            )
+             )
         ) {
             UnifiedExportScreen(
                 previewAspect = aspect,

@@ -256,7 +256,7 @@ private fun FsChip(text: String, selected: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(20.dp))
             .background(if (selected) Color(0xFF0F172A) else Color(0xFFF1F5F9))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         Text(
             text, fontSize = 12.sp,
@@ -373,6 +373,21 @@ private fun FsItemView(
 
 // =================================================================== the screen
 
+/** Everything Undo / Redo restores in the Freestyle editor. Item `aspect` is derived from the loaded image, so it is excluded. */
+private data class FsSnap(
+    val items: List<FreestyleItem>,
+    val aspect: AspectRatio,
+    val bgColor: Color,
+    val bgGradient: List<Long>,
+    val bgPhoto: String?,
+    val bgBlur: Float,
+    val bgTexture: BackgroundTexture,
+    val filterPreset: String,
+    val filterIntensity: Float,
+    val adjustValues: Map<String, Float>,
+    val strokes: List<NormalizedDrawStroke>
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FreestyleEditorScreen(
@@ -466,13 +481,41 @@ fun FreestyleEditorScreen(
         drawStrokes = strokes
     )
 
+    // ---------------------------------------------------------------- Undo / Redo
+    val knownAspects = remember { mutableMapOf<String, Float>() }
+    freeItems.forEach { knownAspects[it.id] = it.aspect }
+    val history = rememberEditHistory(
+        current = FsSnap(
+            items = freeItems.map { it.copy(aspect = 0f) },
+            aspect = aspect, bgColor = bgColor, bgGradient = bgGradient, bgPhoto = bgPhoto, bgBlur = bgBlur,
+            bgTexture = bgTexture, filterPreset = filterPreset, filterIntensity = filterIntensity,
+            adjustValues = adjustValues, strokes = strokes
+        )
+    ) { snap ->
+        // put the measured image aspect back (it is not part of the history)
+        freeItems = snap.items.map { it.copy(aspect = knownAspects[it.id] ?: it.aspect) }
+        aspect = snap.aspect
+        bgColor = snap.bgColor
+        bgGradient = snap.bgGradient
+        bgPhoto = snap.bgPhoto
+        bgBlur = snap.bgBlur
+        bgTexture = snap.bgTexture
+        filterPreset = snap.filterPreset
+        filterIntensity = snap.filterIntensity
+        adjustValues = snap.adjustValues
+        strokes = snap.strokes
+        currentStroke = emptyList()
+        if (selectedId != null && snap.items.none { it.id == selectedId }) selectedId = null
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Freestyle Studio", fontWeight = FontWeight.Bold) },
+                title = { Text("Freestyle Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
+                    UndoRedoActions(history)
                     IconButton(onClick = { showLayers = true }) { Icon(Icons.Default.Layers, "Layers") }
                     Button(
                         onClick = { showExport = true },
@@ -486,11 +529,11 @@ fun FreestyleEditorScreen(
             Column(Modifier.background(Color.White)) {
                 Box(
                     Modifier.fillMaxWidth().height(240.dp).background(Color(0xFFF8FAFC))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Column(
                         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         when (tool) {
                             // ------------------------------------------------ RATIO
@@ -507,7 +550,7 @@ fun FreestyleEditorScreen(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text(r.displayName, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                                Text(r.displayName, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                                                     color = if (sel) Color(0xFF1D4ED8) else Color(0xFF1E293B))
                                                 if (r.badge.isNotEmpty()) Text(r.badge, fontSize = 9.sp, color = Color(0xFF64748B))
                                             }
@@ -522,7 +565,7 @@ fun FreestyleEditorScreen(
                                     bgColor = it; bgGradient = emptyList(); bgPhoto = null
                                 }
                                 FsLabel("Gradients")
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(FsGradients) { g ->
                                         Box(
                                             Modifier.size(32.dp).clip(CircleShape)
@@ -563,7 +606,7 @@ fun FreestyleEditorScreen(
                                     }
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("Soft drop shadow", fontSize = 13.sp, color = Color(0xFF334155))
+                                        Text("Soft drop shadow", fontSize = 12.sp, color = Color(0xFF334155))
                                         Switch(checked = sel.shadow, onCheckedChange = { c -> updateItem(sel.id) { it.copy(shadow = c) } })
                                     }
                                     TextButton(onClick = {
@@ -573,7 +616,7 @@ fun FreestyleEditorScreen(
                                     }) { Text("Apply this frame to all photos") }
                                 } else {
                                     Text("Tap a photo on the canvas to style its frame.\nDrag to move, pinch to resize, twist to rotate.",
-                                        fontSize = 13.sp, color = Color(0xFF64748B))
+                                        fontSize = 12.sp, color = Color(0xFF64748B))
                                 }
                                 OutlinedButton(onClick = { addPhotosPicker.launch() }) { Text("+ Add photos") }
                             }
@@ -581,10 +624,10 @@ fun FreestyleEditorScreen(
                             FsTool.TEXT -> {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically) {
-                                    Text("+ Add Text", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B),
+                                    Text("+ Add Text", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B),
                                         modifier = Modifier.clickable { editingTextId = null; textDialogOpen = true })
                                     val st = selected?.takeIf { it.kind == FreestyleItemKind.TEXT }
-                                    if (st != null) Text("Edit text", fontSize = 13.sp, color = Color(0xFF2563EB),
+                                    if (st != null) Text("Edit text", fontSize = 12.sp, color = Color(0xFF2563EB),
                                         modifier = Modifier.clickable { editingTextId = st.id; textDialogOpen = true })
                                 }
                                 val st = selected?.takeIf { it.kind == FreestyleItemKind.TEXT }
@@ -602,7 +645,7 @@ fun FreestyleEditorScreen(
                                     }
                                 } else {
                                     Text("Add text, then tap it on the canvas to change font, color, size, pill and shadow.",
-                                        fontSize = 13.sp, color = Color(0xFF64748B))
+                                        fontSize = 12.sp, color = Color(0xFF64748B))
                                 }
                             }
                             // ------------------------------------------------ STICKERS
@@ -650,7 +693,7 @@ fun FreestyleEditorScreen(
                                 val currentValue = adjustValues[adjustItem] ?: 0f
                                 Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
                                         Row(
@@ -660,7 +703,7 @@ fun FreestyleEditorScreen(
                                         ) {
                                             Text(
                                                 "$adjustItem: ${if (currentValue > 0 && adjustDef.isBipolar) "+" else ""}${currentValue.toInt()}%",
-                                                fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
+                                                fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
                                             )
                                             Text(
                                                 "Reset all",
@@ -715,7 +758,7 @@ fun FreestyleEditorScreen(
                                         AdjustTools.inGroup(adjustGroup).map { it.name }
                                     }
                                     LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         items(adjustOptions.filter { it.name in groupNames }) { option ->
@@ -793,8 +836,8 @@ fun FreestyleEditorScreen(
                     }
                 }
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FsTool.entries.forEach { t ->
@@ -806,7 +849,7 @@ fun FreestyleEditorScreen(
                                 .clickable { tool = t }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Icon(t.icon, null, tint = if (sel) Color(0xFF2563EB) else Color(0xFF64748B), modifier = Modifier.size(20.dp))
+                            Icon(t.icon, null, tint = if (sel) Color(0xFF2563EB) else Color(0xFF64748B), modifier = Modifier.size(18.dp))
                             Spacer(Modifier.height(2.dp))
                             Text(t.label, fontSize = 10.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                                 color = if (sel) Color(0xFF2563EB) else Color(0xFF64748B))
@@ -937,7 +980,7 @@ fun FreestyleEditorScreen(
                     // background
                     when {
                         bgPhoto != null -> AsyncImage(
-                            model = bgPhoto, contentDescription = null, contentScale = ContentScale.Crop,
+                            model = rememberPhotoRequest(bgPhoto, 1024), contentDescription = null, contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                                 .blur(with(density) { (bgBlur / 100f * 0.05f * W).toDp() }, BlurredEdgeTreatment.Rectangle)
                         )
@@ -989,7 +1032,7 @@ fun FreestyleEditorScreen(
     if (showLayers) {
         ModalBottomSheet(onDismissRequest = { showLayers = false }) {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-                Text("Layers (top = front)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("Layers (top = front)", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 if (freeItems.isEmpty()) Text("Nothing on the canvas yet.", color = Color(0xFF64748B))
                 LazyColumn(Modifier.heightIn(max = 380.dp)) {
@@ -1061,7 +1104,6 @@ fun FreestyleEditorScreen(
             onDismissRequest = { showExport = false },
             properties = androidx.compose.ui.window.DialogProperties(
                 usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false
             )
         ) {
             val exportProject = buildProject()
@@ -1107,7 +1149,7 @@ fun FreestyleEditorScreen(
             onDismissRequest = { if (!isSaving) showExport = false },
             title = { Text("Save collage") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     FsLabel("Quality")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("HD" to 1080, "2K" to 2048, "4K" to 3840).forEach { (n, px) ->

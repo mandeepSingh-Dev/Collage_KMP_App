@@ -2,6 +2,7 @@ package com.oem.collagekmpapp.ui
 
 import androidx.compose.runtime.Composable
 import com.oem.collagekmpapp.FreestyleProject
+import com.oem.collagekmpapp.PhotoToolsState
 
 /**
  * Everything the single-photo editor (SpTool.kt) shows on screen, in a platform-neutral form.
@@ -33,7 +34,9 @@ data class SinglePhotoEdit(
     val blurCx: Float,
     val blurCy: Float,
     val blurR: Float,
-    val project: FreestyleProject
+    val project: FreestyleProject,
+    /** Snapseed-style tools: selective points, vintage, lens blur, glamour glow, perspective (all default to "off"). */
+    val tools: PhotoToolsState = PhotoToolsState()
 )
 
 /** Platform bridge (same pattern as rememberFreestyleExporter). longSide = px of the longest edge, format = "JPG" | "PNG". */

@@ -58,9 +58,15 @@ import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.AdjustTools
 import com.oem.collagekmpapp.FilterPickerPanel
 import com.oem.collagekmpapp.OverlayMetrics
+import com.oem.collagekmpapp.UndoRedoActions
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberGalleryPicker
+import com.oem.collagekmpapp.rememberPhotoRequest
 import com.oem.collagekmpapp.model.*
+import com.oem.collagekmpapp.rememberEditHistory
+
+/** LayoutRepository provides layouts for 1..50 photos. */
+private const val MAX_COLLAGE_PHOTOS = 50
 
 enum class EditorTool {
     RATIO, LAYOUT, BORDER, FILTER, STICKERS, ADJUST, GLITTER, TEXT, BACKGROUND, DRAW
@@ -109,6 +115,32 @@ sealed class OverlayItem {
 data class AdjustOption(
     val name: String,
     val icon: ImageVector
+)
+
+/** Everything Undo / Redo restores in the collage editor (immutable value, compared by equality). */
+private data class CollageSnap(
+    val photos: List<String>,
+    val layoutId: String,
+    val slots: List<com.oem.collagekmpapp.model.Slot>,
+    val aspectRatio: AspectRatio,
+    val border: BorderSettings,
+    val transforms: Map<Int, PhotoTransform>,
+    val adjust: Map<String, Float>,
+    val preset: String,
+    val intensity: Float,
+    val glitterDensity: Float,
+    val glitterCard: String,
+    val font: String,
+    val text: String,
+    val textColor: Color,
+    val textOffset: Offset,
+    val bgColor: Color,
+    val bgGradient: Brush?,
+    val bgGradientColors: List<Color>,
+    val bgFade: Float,
+    val bgPhoto: String?,
+    val strokes: List<DrawStroke>,
+    val overlays: List<OverlayItem>
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -288,6 +320,55 @@ fun CollageEditorScreen(
         replaceIndex = null
     }
 
+    // ---------------------------------------------------------------- Photo strip (thumbnail bar)
+    // Every operation below only touches currentPhotos / layout id / photoTransforms, which are all part of
+    // CollageSnap, so each one is a single Undo step. Layout transformations (resized boxes, ratio, border,
+    // filters, stickers ...) are never touched, except that a changed photo COUNT needs a layout with that many boxes.
+    var showPhotoStrip by remember { mutableStateOf(true) }
+
+    fun relayoutFor(n: Int) {
+        layoutRepo.getLayouts(n.coerceAtLeast(1)).firstOrNull()?.let { currentLayoutId = it.id }
+    }
+
+    val addPhotoPicker = rememberGalleryPicker { uris ->
+        val room = (MAX_COLLAGE_PHOTOS - currentPhotos.size).coerceAtLeast(0)
+        val add = uris.take(room)
+        if (add.isNotEmpty()) {
+            currentPhotos = currentPhotos + add
+            relayoutFor(currentPhotos.size)
+        }
+    }
+
+    /** Moves the photo at [from] to [to]; its pan / zoom travels with it. */
+    fun movePhoto(from: Int, to: Int) {
+        if (from !in currentPhotos.indices || to !in currentPhotos.indices || from == to) return
+        val list = currentPhotos.toMutableList()
+        list.add(to, list.removeAt(from))
+        val remapped = HashMap<Int, PhotoTransform>()
+        for (i in list.indices) {
+            val src = when {
+                i == to -> from
+                from < to && i in from until to -> i + 1
+                from > to && i in (to + 1)..from -> i - 1
+                else -> i
+            }
+            photoTransforms[src]?.let { remapped[i] = it }
+        }
+        currentPhotos = list
+        photoTransforms = remapped
+        selectedSlotIndex = to
+    }
+
+    fun deletePhoto(idx: Int) {
+        if (currentPhotos.size <= 1 || idx !in currentPhotos.indices) return
+        val list = currentPhotos.toMutableList().also { it.removeAt(idx) }
+        val remapped = HashMap<Int, PhotoTransform>()
+        photoTransforms.forEach { (k, v) -> if (k < idx) remapped[k] = v else if (k > idx) remapped[k - 1] = v }
+        currentPhotos = list
+        photoTransforms = remapped
+        relayoutFor(list.size)
+    }
+
     val photoStickerPicker = rememberGalleryPicker { selectedUris ->
         if (selectedUris.isNotEmpty()) {
             val newItem = OverlayItem.Photo(
@@ -404,16 +485,64 @@ fun CollageEditorScreen(
 
     val brushTypes = listOf("Pen", "Eraser")
 
+    // ---------------------------------------------------------------- Undo / Redo
+    // Layout slots are keyed to the layout id (remember(currentLayoutId)); restoring an older layout must
+    // therefore re-apply the saved slots AFTER that reset, otherwise resized boxes would be lost.
+    var pendingRestoredSlots by remember { mutableStateOf<List<com.oem.collagekmpapp.model.Slot>?>(null) }
+    LaunchedEffect(currentLayoutId, pendingRestoredSlots) {
+        pendingRestoredSlots?.let { currentSlots = it; pendingRestoredSlots = null }
+    }
+    val history = rememberEditHistory(
+        current = CollageSnap(
+            photos = currentPhotos, layoutId = currentLayoutId, slots = currentSlots,
+            aspectRatio = aspectRatio, border = borderSettings, transforms = photoTransforms,
+            adjust = adjustValues, preset = selectedPreset, intensity = filterIntensity,
+            glitterDensity = glitterDensity, glitterCard = selectedGlitterCard,
+            font = selectedFont, text = collageText, textColor = textColor, textOffset = textOffset,
+            bgColor = canvasBgColor, bgGradient = canvasBgGradient, bgGradientColors = canvasBgGradientColors,
+            bgFade = backgroundFade, bgPhoto = selectedBackgroundPhoto,
+            strokes = drawStrokes, overlays = overlayItems
+        )
+    ) { snap ->
+        currentPhotos = snap.photos
+        currentLayoutId = snap.layoutId
+        currentSlots = snap.slots
+        pendingRestoredSlots = snap.slots
+        aspectRatio = snap.aspectRatio
+        borderSettings = snap.border
+        photoTransforms = snap.transforms
+        adjustValues = snap.adjust
+        selectedPreset = snap.preset
+        filterIntensity = snap.intensity
+        glitterDensity = snap.glitterDensity
+        selectedGlitterCard = snap.glitterCard
+        selectedFont = snap.font
+        collageText = snap.text
+        textColor = snap.textColor
+        textOffset = snap.textOffset
+        canvasBgColor = snap.bgColor
+        canvasBgGradient = snap.bgGradient
+        canvasBgGradientColors = snap.bgGradientColors
+        backgroundFade = snap.bgFade
+        selectedBackgroundPhoto = snap.bgPhoto
+        drawStrokes = snap.strokes
+        overlayItems = snap.overlays
+        currentStrokePoints = emptyList()
+        selectedSlotIndex = null
+        if (selectedOverlayId != null && snap.overlays.none { it.id == selectedOverlayId }) selectedOverlayId = null
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Collage Studio Editor", fontWeight = FontWeight.Bold) },
+                title = { Text("Collage Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
+                    UndoRedoActions(history)
                     Button(
                         onClick = { showExportDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
@@ -426,19 +555,32 @@ fun CollageEditorScreen(
         },
         bottomBar = {
             Column(modifier = Modifier.background(Color.White)) {
+                // Photo strip: view / select / add / replace / reorder / delete the photos of the collage
+                CollagePhotoStrip(
+                    photos = currentPhotos,
+                    selectedIndex = selectedSlotIndex,
+                    expanded = showPhotoStrip,
+                    canAdd = currentPhotos.size < MAX_COLLAGE_PHOTOS,
+                    onToggle = { showPhotoStrip = !showPhotoStrip },
+                    onSelect = { selectedSlotIndex = it },
+                    onAdd = { addPhotoPicker.launch() },
+                    onReplace = { idx -> replaceIndex = idx; replacePhotoPicker.launch() },
+                    onMove = { from, to -> movePhoto(from, to) },
+                    onDelete = { deletePhoto(it) }
+                )
                 // Dynamic Tool Sub-Panel
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(230.dp)
                         .background(Color(0xFFF8FAFC))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     when (selectedTab) {
                         EditorTool.RATIO -> {
                             Column(
                                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text("Canvas Aspect Ratio", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                                 LazyRow(
@@ -464,7 +606,7 @@ fun CollageEditorScreen(
                                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                                 Text(
                                                     text = ratio.displayName,
-                                                    fontSize = 13.sp,
+                                                    fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF1E293B)
                                                 )
@@ -497,8 +639,8 @@ fun CollageEditorScreen(
                                 Text("Select Layout Grid", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                                 LazyVerticalGrid(
                                     columns = GridCells.Fixed(4),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth().height(160.dp)
                                 ) {
                                     gridItems(layouts) { layout ->
@@ -605,9 +747,9 @@ fun CollageEditorScreen(
                                     .verticalScroll(rememberScrollState())
                                     .animateContentSize()
                                     .padding(vertical = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Stickers", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                Text("Stickers", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -622,7 +764,7 @@ fun CollageEditorScreen(
                                         ) {
                                             Text(
                                                 text = category,
-                                                fontSize = 13.sp,
+                                                fontSize = 12.sp,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                 color = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B)
                                             )
@@ -643,8 +785,8 @@ fun CollageEditorScreen(
 
                                 LazyVerticalGrid(
                                     columns = GridCells.Fixed(5),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth().height(140.dp)
                                 ) {
                                     item {
@@ -699,7 +841,7 @@ fun CollageEditorScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     Row(
@@ -709,7 +851,7 @@ fun CollageEditorScreen(
                                     ) {
                                         Text(
                                             "$selectedAdjustItem: ${if (currentValue > 0 && adjustDef.isBipolar) "+" else ""}${currentValue.toInt()}%",
-                                            fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
+                                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)
                                         )
                                         Text(
                                             "Reset all",
@@ -764,7 +906,7 @@ fun CollageEditorScreen(
                                     AdjustTools.inGroup(selectedAdjustGroup).map { it.name }
                                 }
                                 LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     items(adjustOptions.filter { it.name in groupNames }) { option ->
@@ -836,7 +978,7 @@ fun CollageEditorScreen(
                                     .padding(vertical = 4.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text("Glitters", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                                Text("Glitters", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     Text("Density: ${glitterDensity.toInt()}%", fontSize = 12.sp, color = Color(0xFF334155))
@@ -850,7 +992,7 @@ fun CollageEditorScreen(
                                 }
 
                                 LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     items(glitterCards) { card ->
@@ -981,7 +1123,7 @@ fun CollageEditorScreen(
                                         ) {
                                             Text(
                                                 text = font,
-                                                fontSize = 13.sp,
+                                                fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF1E293B)
                                             )
@@ -1002,7 +1144,7 @@ fun CollageEditorScreen(
 
                                 Text("Solid Colors", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
                                 LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     items(solidColors) { color ->
@@ -1025,7 +1167,7 @@ fun CollageEditorScreen(
 
                                 Text("Gradients", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
                                 LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     itemsIndexed(gradients) { gIndex, grad ->
@@ -1096,7 +1238,7 @@ fun CollageEditorScreen(
                         EditorTool.DRAW -> {
                             Column(
                                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text("Draw & Brush", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
 
@@ -1176,8 +1318,8 @@ fun CollageEditorScreen(
                         .fillMaxWidth()
                         .background(Color.White)
                         .horizontalScroll(scrollState)
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val tools = remember(currentPhotos.size) {
@@ -1214,7 +1356,7 @@ fun CollageEditorScreen(
                                     imageVector = icon,
                                     contentDescription = null,
                                     tint = if (isSelected) Color(0xFF2563EB) else Color(0xFF64748B),
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             } else {
                                 Text(
@@ -1314,7 +1456,7 @@ fun CollageEditorScreen(
             ) {
                 if (selectedBackgroundPhoto != null) {
                     AsyncImage(
-                        model = selectedBackgroundPhoto,
+                        model = rememberPhotoRequest(selectedBackgroundPhoto, 1024),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -1404,9 +1546,10 @@ fun CollageEditorScreen(
 
                 // Render Movable Sticker Overlays with Delete (X), Rotate (🔄), and Enlarge (⤢ with zoom in/out drag gesture)
                 overlayItems.forEach { item ->
-                    var itemOffset by remember(item.id) { mutableStateOf(item.offset) }
-                    var itemRotation by remember(item.id) { mutableStateOf(item.rotation) }
-                    var itemScale by remember(item.id) { mutableStateOf(item.scale) }
+                    // read straight from the item (single source of truth) so Undo / Redo can restore it
+                    val itemOffset = item.offset
+                    val itemRotation = item.rotation
+                    val itemScale = item.scale
                     val isSelected = selectedOverlayId == item.id
 
                     Box(
@@ -1420,13 +1563,12 @@ fun CollageEditorScreen(
                                     Modifier.pointerInput(item.id) {
                                         detectDragGestures { _, dragAmount ->
                                             selectedOverlayId = item.id
-                                            itemOffset += dragAmount
                                             overlayItems = overlayItems.map {
                                                 if (it.id == item.id) {
                                                     when (it) {
-                                                        is OverlayItem.Emoji -> it.copy(offset = itemOffset)
-                                                        is OverlayItem.Photo -> it.copy(offset = itemOffset)
-                                                        is OverlayItem.Text -> it.copy(offset = itemOffset)
+                                                        is OverlayItem.Emoji -> it.copy(offset = it.offset + dragAmount)
+                                                        is OverlayItem.Photo -> it.copy(offset = it.offset + dragAmount)
+                                                        is OverlayItem.Text -> it.copy(offset = it.offset + dragAmount)
                                                     }
                                                 } else it
                                             }
@@ -1500,13 +1642,13 @@ fun CollageEditorScreen(
                                     .clip(CircleShape)
                                     .background(Color(0xFF2563EB))
                                     .clickable {
-                                        itemRotation = (itemRotation + 15f) % 360f
+                                        val newRotation = ((overlayItems.firstOrNull { it.id == item.id }?.rotation ?: itemRotation) + 15f) % 360f
                                         overlayItems = overlayItems.map {
                                             if (it.id == item.id) {
                                                 when (it) {
-                                                    is OverlayItem.Emoji -> it.copy(rotation = itemRotation)
-                                                    is OverlayItem.Photo -> it.copy(rotation = itemRotation)
-                                                    is OverlayItem.Text -> it.copy(rotation = itemRotation)
+                                                    is OverlayItem.Emoji -> it.copy(rotation = newRotation)
+                                                    is OverlayItem.Photo -> it.copy(rotation = newRotation)
+                                                    is OverlayItem.Text -> it.copy(rotation = newRotation)
                                                 }
                                             } else it
                                         }
@@ -1532,13 +1674,13 @@ fun CollageEditorScreen(
                                     .pointerInput(item.id) {
                                         detectDragGestures { _, dragAmount ->
                                             val scaleDelta = (dragAmount.x + dragAmount.y) * 0.005f
-                                            itemScale = (itemScale + scaleDelta).coerceIn(0.4f, 3.5f)
+                                            val newScale = ((overlayItems.firstOrNull { it.id == item.id }?.scale ?: itemScale) + scaleDelta).coerceIn(0.4f, 3.5f)
                                             overlayItems = overlayItems.map {
                                                 if (it.id == item.id) {
                                                     when (it) {
-                                                        is OverlayItem.Emoji -> it.copy(scale = itemScale)
-                                                        is OverlayItem.Photo -> it.copy(scale = itemScale)
-                                                        is OverlayItem.Text -> it.copy(scale = itemScale)
+                                                        is OverlayItem.Emoji -> it.copy(scale = newScale)
+                                                        is OverlayItem.Photo -> it.copy(scale = newScale)
+                                                        is OverlayItem.Text -> it.copy(scale = newScale)
                                                     }
                                                 } else it
                                             }
@@ -1839,6 +1981,113 @@ fun LayoutThumbnailPreview(layoutId: String, isSelected: Boolean) {
             }
         } else {
             drawLine(color = strokeColor, start = Offset(w * 0.5f, 0f), end = Offset(w * 0.5f, h), strokeWidth = strokeWidth)
+        }
+    }
+}
+
+// =====================================================================================
+// Photo strip
+// =====================================================================================
+
+/**
+ * Collapsible thumbnail bar above the tool panel.
+ * Tap a thumbnail = select / focus its box on the canvas (tap again to deselect). With a photo selected the header
+ * offers Replace (gallery), Move left / right (swap with the neighbour) and Delete. The trailing "+" adds photos.
+ */
+@Composable
+private fun CollagePhotoStrip(
+    photos: List<String>,
+    selectedIndex: Int?,
+    expanded: Boolean,
+    canAdd: Boolean,
+    onToggle: () -> Unit,
+    onSelect: (Int?) -> Unit,
+    onAdd: () -> Unit,
+    onReplace: (Int) -> Unit,
+    onMove: (from: Int, to: Int) -> Unit,
+    onDelete: (Int) -> Unit
+) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val sel = selectedIndex?.takeIf { it in photos.indices }
+    LaunchedEffect(sel) { if (sel != null) listState.animateScrollToItem(sel) }
+
+    Column(Modifier.fillMaxWidth().background(Color.White)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE2E8F0)))
+        Row(
+            Modifier.fillMaxWidth().height(36.dp).padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onToggle).padding(vertical = 6.dp, horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Photos · ${photos.size}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF475569))
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                    contentDescription = if (expanded) "Hide photo strip" else "Show photo strip",
+                    tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (expanded && sel != null) {
+                IconButton(onClick = { onReplace(sel) }, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.SwapHoriz, "Replace photo", tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { onMove(sel, sel - 1) }, enabled = sel > 0, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.ChevronLeft, "Move left", modifier = Modifier.size(22.dp))
+                }
+                IconButton(onClick = { onMove(sel, sel + 1) }, enabled = sel < photos.lastIndex, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.ChevronRight, "Move right", modifier = Modifier.size(22.dp))
+                }
+                IconButton(onClick = { onDelete(sel) }, enabled = photos.size > 1, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        Icons.Default.Delete, "Delete photo",
+                        tint = if (photos.size > 1) Color(0xFFEF4444) else Color(0xFFCBD5E1), modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+        if (expanded) {
+            LazyRow(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(count = photos.size, key = { "$it|${photos[it]}" }) { i ->
+                    val isSel = i == sel
+                    Box(
+                        Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFE2E8F0))
+                            .border(if (isSel) 2.5.dp else 1.dp, if (isSel) Color(0xFF2563EB) else Color(0xFFCBD5E1), RoundedCornerShape(10.dp))
+                            .clickable { onSelect(if (isSel) null else i) }
+                    ) {
+                        AsyncImage(
+                            model = photos[i], contentDescription = "Photo ${i + 1}",
+                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                        )
+                        Box(
+                            Modifier.align(Alignment.BottomStart).padding(3.dp).size(16.dp).clip(CircleShape)
+                                .background(if (isSel) Color(0xFF2563EB) else Color(0xAA0F172A)),
+                            contentAlignment = Alignment.Center
+                        ) { Text("${i + 1}", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                    }
+                }
+                item {
+                    Box(
+                        Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))
+                            .background(if (canAdd) Color(0xFFEFF6FF) else Color(0xFFF1F5F9))
+                            .border(1.dp, if (canAdd) Color(0xFF93C5FD) else Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
+                            .clickable(enabled = canAdd, onClick = onAdd),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add, "Add photos",
+                            tint = if (canAdd) Color(0xFF2563EB) else Color(0xFFCBD5E1)
+                        )
+                    }
+                }
+            }
         }
     }
 }

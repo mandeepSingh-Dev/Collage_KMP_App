@@ -23,7 +23,9 @@ data class FilterSpec(
     val gShift: Float = 0f,
     val bShift: Float = 0f,
     val vignette: Float = 0f,     // 0..1 edge darkening
-    val glow: Float = 0f          // 0..1 soft bloom (the 'glowing skin' look)
+    val glow: Float = 0f,         // 0..1 soft bloom (the 'glowing skin' look)
+    val structure: Float = 0f,    // -1..1 mid-tone local contrast (presets may carry it; default = none)
+    val sharpen: Float = 0f       // 0..1 edge definition (presets may carry it; default = none)
 )
 
 object PhotoFilters {
@@ -138,14 +140,57 @@ object PhotoColorEngine {
     )
 
     /** Returns null when nothing needs to be applied (keeps the fast path free). */
-    fun buildMatrix(preset: String, intensity: Float, adjustValues: Map<String, Float>): FloatArray? {
+    fun buildMatrix(
+        preset: String,
+        intensity: Float,
+        adjustValues: Map<String, Float>,
+        tools: PhotoToolsState? = null          // Snapseed-style tools (Vintage / Glamour colour part)
+    ): FloatArray? {
         val t = (intensity / 100f).coerceIn(0f, 1f)
         var m = IDENTITY
         val spec = PhotoFilters.specs[preset]
         if (spec != null && t > 0f) m = lerp(IDENTITY, specToMatrix(spec), t)
         val adj = adjustMatrix(adjustValues)
         if (adj != null) m = concat(adj, m)          // filter first, then user adjustments on top
+        if (tools != null) {
+            vintageMatrix(tools.vintage)?.let { m = concat(it, m) }
+            glamourMatrix(tools.glamour)?.let { m = concat(it, m) }
+        }
         return if (m === IDENTITY) null else m
+    }
+
+    /** Colour part of the Vintage tool: tint gains + faded matte + muted saturation, then user brightness / saturation. */
+    fun vintageMatrix(v: VintageState): FloatArray? {
+        if (!v.on) return null
+        val t = (v.strength / 100f).coerceIn(0f, 1f)
+        fun lerpGain(g: Float) = 1f + (g - 1f) * t
+        var m = IDENTITY
+        m = concat(saturationM((1f - 0.25f * t) * (1f + v.saturation / 50f)), m)
+        m = concat(diag(lerpGain(v.tint.r), lerpGain(v.tint.g), lerpGain(v.tint.b), 0f, 0f, 0f), m)
+        m = concat(contrastM(-0.12f * t), m)
+        m = concat(brightnessM(v.brightness / 50f), m)
+        m = concat(fadeM(0.16f * t), m)
+        return m
+    }
+
+    /** Colour part of Glamour Glow (the soft bloom itself is PhotoEffects.glamour). */
+    fun glamourMatrix(g: GlamourState): FloatArray? {
+        if (!g.on) return null
+        if (kotlin.math.abs(g.saturation) < 0.01f && kotlin.math.abs(g.warmth) < 0.01f) return null
+        val w = g.warmth / 50f
+        var m = IDENTITY
+        m = concat(saturationM(1f + 0.6f * g.saturation / 50f), m)
+        m = concat(diag(1f + .18f * w, 1f + .03f * w, 1f - .18f * w, 0f, 0f, 0f), m)
+        return m
+    }
+
+    /** Selective control point: the global grade [base] followed by the point's own brightness / contrast / saturation. */
+    fun selectiveMatrix(base: FloatArray?, p: SelectivePoint): FloatArray {
+        var m = base ?: IDENTITY
+        if (kotlin.math.abs(p.saturation) >= 0.5f) m = concat(saturationM(1f + p.saturation / 50f), m)
+        if (kotlin.math.abs(p.contrast) >= 0.5f) m = concat(contrastM(p.contrast / 50f), m)
+        if (kotlin.math.abs(p.brightness) >= 0.5f) m = concat(brightnessM(p.brightness / 50f), m)
+        return m
     }
 
     fun vignetteStrength(preset: String, intensity: Float): Float {
@@ -160,16 +205,28 @@ object PhotoColorEngine {
     }
 
     /** Everything that is NOT a plain colour matrix (blur, sharpen, grain, vignette, glow...). */
-    fun effects(preset: String, intensity: Float, adjustValues: Map<String, Float>): PhotoEffects {
+    fun effects(
+        preset: String,
+        intensity: Float,
+        adjustValues: Map<String, Float>,
+        tools: PhotoToolsState? = null          // Snapseed-style tools (Vintage vignette / grain, Glamour bloom)
+    ): PhotoEffects {
         fun n(name: String) = AdjustTools.norm(adjustValues, name)
+        val t = (intensity / 100f).coerceIn(0f, 1f)
+        val spec = PhotoFilters.specs[preset]
+        val vin = tools?.vintage?.takeIf { it.on }
+        val vt = vin?.let { (it.strength / 100f).coerceIn(0f, 1f) } ?: 0f
         return PhotoEffects(
             blur = n("Blur"),
-            sharpen = n("Sharpen"),
+            sharpen = ((spec?.sharpen ?: 0f) * t + n("Sharpen")).coerceIn(0f, 1f),
             clarity = n("Clarity"),
             soften = n("Soften"),
-            grain = n("Grain"),
-            vignette = (vignetteStrength(preset, intensity) + n("Vignette") * 0.8f).coerceIn(-0.85f, 0.85f),
-            glow = (glowStrength(preset, intensity) + n("Glow")).coerceIn(0f, 1f)
+            grain = (n("Grain") + 0.3f * vt).coerceIn(0f, 1f),
+            vignette = (vignetteStrength(preset, intensity) + n("Vignette") * 0.8f +
+                    (vin?.let { it.vignette / 100f * 0.8f } ?: 0f)).coerceIn(-0.85f, 0.85f),
+            glow = (glowStrength(preset, intensity) + n("Glow")).coerceIn(0f, 1f),
+            structure = ((spec?.structure ?: 0f) * t + n("Structure")).coerceIn(-1f, 1f),
+            glamour = tools?.glamour?.takeIf { it.on }?.let { (it.glow / 100f).coerceIn(0f, 1f) } ?: 0f
         )
     }
 
@@ -378,7 +435,8 @@ object AdjustTools {
         AdjustDef("Sepia", "Color", 0f, 100f),
         // Detail
         AdjustDef("Clarity", "Detail", -50f, 50f),
-        AdjustDef("Sharpen", "Detail", 0f, 100f),
+        AdjustDef("Structure", "Detail", -50f, 50f),      // mid-tone local contrast (negative = smoother)
+        AdjustDef("Sharpen", "Detail", 0f, 100f),         // edge definition ("Sharpening" in the Details panel)
         AdjustDef("Blur", "Detail", 0f, 100f),
         AdjustDef("Soften", "Detail", 0f, 100f),
         // Effects
@@ -403,10 +461,13 @@ data class PhotoEffects(
     val soften: Float = 0f,     // 0..1
     val grain: Float = 0f,      // 0..1
     val vignette: Float = 0f,   // -1..1 (negative = white vignette)
-    val glow: Float = 0f        // 0..1
+    val glow: Float = 0f,       // 0..1
+    val structure: Float = 0f,  // -1..1 mid-tone local contrast (negative = smoother)
+    val glamour: Float = 0f     // 0..1 soft-focus glamour glow
 ) {
     val hasSpatial: Boolean
-        get() = blur > 0.01f || soften > 0.01f || kotlin.math.abs(clarity) > 0.01f || sharpen > 0.01f || glow > 0.01f
+        get() = blur > 0.01f || soften > 0.01f || kotlin.math.abs(clarity) > 0.01f || sharpen > 0.01f || glow > 0.01f ||
+                kotlin.math.abs(structure) > 0.01f || glamour > 0.01f
 
     companion object { val None = PhotoEffects() }
 }
@@ -418,6 +479,9 @@ object EffectRadii {
     const val CLARITY = 0.03f
     const val SHARPEN = 0.004f
     const val GLOW = 0.03f
+    const val STRUCTURE = 0.012f   // mid-tone local contrast (between sharpen and clarity)
+    const val GLAMOUR = 0.05f      // soft-focus glamour glow
+    const val LENS = 0.05f         // lens blur at 100 %
 }
 
 /** Deterministic film-grain tile shared by preview and export. */
