@@ -11,9 +11,18 @@ import com.oem.collagekmpapp.model.Screen
 @Composable
 fun HomeContainer(
     selectedSavePath: String,
-    onNavigate: (Screen) -> Unit
+    onNavigate: (Screen) -> Unit,
+    shortcutAction: String? = null,
+    onShortcutActionConsumed: () -> Unit = {}
 ) {
     var currentTab by remember { mutableStateOf(AppTab.Home) }
+
+    LaunchedEffect(shortcutAction) {
+        if (shortcutAction == "resume_draft") {
+            currentTab = AppTab.Creations
+            onShortcutActionConsumed()
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -32,7 +41,11 @@ fun HomeContainer(
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             when (currentTab) {
-                AppTab.Home -> HomeScreen(onNavigate = onNavigate)
+                AppTab.Home -> HomeScreen(
+                    onNavigate = onNavigate,
+                    shortcutAction = shortcutAction,
+                    onShortcutActionConsumed = onShortcutActionConsumed
+                )
                 AppTab.Creations -> CreationsScreen(savePath = selectedSavePath, onNavigate = onNavigate)
                 AppTab.Settings -> SettingsScreen(selectedSavePath = selectedSavePath, onNavigate = onNavigate)
             }

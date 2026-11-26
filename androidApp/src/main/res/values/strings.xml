@@ -1,3 +1,9 @@
 <resources>
-    <string name="app_name">CollageKMPApp</string>
+    <string name="app_name">Collage Studio</string>
+    <string name="shortcut_grid_collage_short">New Grid Collage</string>
+    <string name="shortcut_grid_collage_long">Start a new Grid Collage</string>
+    <string name="shortcut_freestyle_short">Freestyle Canvas</string>
+    <string name="shortcut_freestyle_long">Create a Freestyle Canvas collage</string>
+    <string name="shortcut_resume_draft_short">Resume Last Draft</string>
+    <string name="shortcut_resume_draft_long">View My Creations &amp; Drafts</string>
 </resources>

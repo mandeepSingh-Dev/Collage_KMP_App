@@ -61,12 +61,16 @@ private fun navTransition(from: NavEntry, to: NavEntry): ContentTransform = when
  * @param sharedImages           images shared into the app from another app (Android share sheet), or null.
  *                               Defaults keep every existing caller (iOS MainViewController, previews) unchanged.
  * @param onSharedImagesConsumed called once the user picked a feature or dismissed the picker.
+ * @param shortcutAction         action triggered from an launcher app shortcut (e.g. "grid_collage", "freestyle", "resume_draft").
+ * @param onShortcutActionConsumed called once the shortcut action is handled.
  */
 @Composable
 @Preview
 fun App(
     sharedImages: SharedImagesPayload? = null,
-    onSharedImagesConsumed: () -> Unit = {}
+    onSharedImagesConsumed: () -> Unit = {},
+    shortcutAction: String? = null,
+    onShortcutActionConsumed: () -> Unit = {}
 ) {
     MaterialTheme {
         // global, persisted settings (resolution / format / watermark / ...) used by every export screen
@@ -127,7 +131,9 @@ fun App(
                                 selectedSavePath = selectedSavePath,
                                 onNavigate = { targetScreen ->
                                     backStack.add(targetScreen)
-                                }
+                                },
+                                shortcutAction = shortcutAction,
+                                onShortcutActionConsumed = onShortcutActionConsumed
                             )
                         }
                         is Screen.Home -> {

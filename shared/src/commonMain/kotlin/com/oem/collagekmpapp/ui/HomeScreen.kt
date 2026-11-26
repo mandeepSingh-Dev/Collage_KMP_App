@@ -35,7 +35,9 @@ import com.oem.collagekmpapp.model.Screen
 
 @Composable
 fun HomeScreen(
-    onNavigate: (Screen) -> Unit
+    onNavigate: (Screen) -> Unit,
+    shortcutAction: String? = null,
+    onShortcutActionConsumed: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -107,6 +109,19 @@ fun HomeScreen(
                     templateId = template.id
                 )
             )
+        }
+    }
+
+    LaunchedEffect(shortcutAction) {
+        when (shortcutAction) {
+            "grid_collage" -> {
+                galleryPicker.launch()
+                onShortcutActionConsumed()
+            }
+            "freestyle" -> {
+                freestyleGalleryPicker.launch()
+                onShortcutActionConsumed()
+            }
         }
     }
 

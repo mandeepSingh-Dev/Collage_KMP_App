@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="shortcut_grid_collage"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_grid"
+        android:shortcutShortLabel="@string/shortcut_grid_collage_short"
+        android:shortcutLongLabel="@string/shortcut_grid_collage_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.oem.collagekmpapp"
+            android:targetClass="com.oem.collagekmpapp.MainActivity">
+            <extra
+                android:name="shortcut_action"
+                android:value="grid_collage" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_freestyle"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_brush"
+        android:shortcutShortLabel="@string/shortcut_freestyle_short"
+        android:shortcutLongLabel="@string/shortcut_freestyle_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.oem.collagekmpapp"
+            android:targetClass="com.oem.collagekmpapp.MainActivity">
+            <extra
+                android:name="shortcut_action"
+                android:value="freestyle" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_resume_draft"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_folder"
+        android:shortcutShortLabel="@string/shortcut_resume_draft_short"
+        android:shortcutLongLabel="@string/shortcut_resume_draft_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.oem.collagekmpapp"
+            android:targetClass="com.oem.collagekmpapp.MainActivity">
+            <extra
+                android:name="shortcut_action"
+                android:value="resume_draft" />
+        </intent>
+    </shortcut>
+</shortcuts>

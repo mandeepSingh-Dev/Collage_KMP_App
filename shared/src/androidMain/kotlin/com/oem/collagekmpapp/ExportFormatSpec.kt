@@ -33,6 +33,9 @@ internal fun exportFormatSpec(format: String): ExportFormatSpec = when {
  */
 internal fun Bitmap.withExportWatermark(): Bitmap {
     if (!ExportOptions.watermark) return this
+    // App name / custom signature (ExportOptions.watermarkText) / today's date
+    val stamp = ExportOptions.resolvedWatermarkText()
+    if (stamp.isBlank()) return this
     val target = if (isMutable) this else copy(Bitmap.Config.ARGB_8888, true) ?: return this
     val canvas = Canvas(target)
     val w = target.width.toFloat()
@@ -46,6 +49,14 @@ internal fun Bitmap.withExportWatermark(): Bitmap {
         textAlign = Paint.Align.RIGHT
     }
     val margin = w * 0.03f
-    canvas.drawText(ExportOptions.watermarkText, target.width - margin, target.height - margin, paint)
+    // long signatures shrink to fit instead of running off the left edge
+    val maxTextWidth = target.width - margin * 2f
+    val measured = paint.measureText(stamp)
+    if (measured > maxTextWidth && measured > 0f) {
+        val fitted = textSize * (maxTextWidth / measured)
+        paint.textSize = fitted
+        paint.setShadowLayer(fitted * 0.18f, 0f, fitted * 0.06f, 0x99000000.toInt())
+    }
+    canvas.drawText(stamp, target.width - margin, target.height - margin, paint)
     return target
 }

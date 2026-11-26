@@ -1,5 +1,10 @@
 package com.oem.collagekmpapp
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,6 +73,11 @@ fun UnifiedExportScreen(
     var longSide by remember { mutableStateOf(AppSettings.longSide) }
     var format by remember { mutableStateOf(if (forcePng) "PNG" else AppSettings.formatToken) }
     var watermark by remember { mutableStateOf(AppSettings.watermark) }
+    // quick per-export edits of the stamp (start from Settings; "Save as default" writes them back)
+    var watermarkType by remember { mutableStateOf(AppSettings.watermarkType) }
+    var watermarkText by remember { mutableStateOf(AppSettings.watermarkText) }
+    var watermarkDatePattern by remember { mutableStateOf(AppSettings.watermarkDatePattern) }
+    val stampText = watermarkStampText(watermarkType, watermarkText, watermarkDatePattern)
 
     var copiedToast by remember { mutableStateOf(false) }
     var isSavedToGallery by remember { mutableStateOf(false) }
@@ -137,6 +147,8 @@ fun UnifiedExportScreen(
                         )
                     } else {
                         preview()
+                        // live preview of the stamp (the saved file above already contains the real one)
+                        if (watermark) WatermarkOverlay(stampText)
                     }
                 }
             }
@@ -219,6 +231,32 @@ fun UnifiedExportScreen(
                         NeuSwitch(checked = watermark, onCheckedChange = { watermark = it })
                     }
 
+                    // stamp type / signature / date format, only while the watermark is on
+                    AnimatedVisibility(
+                        visible = watermark,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        val changedFromDefault = watermarkType != AppSettings.watermarkType ||
+                                watermarkText != AppSettings.watermarkText ||
+                                watermarkDatePattern != AppSettings.watermarkDatePattern
+                        WatermarkStyleEditor(
+                            type = watermarkType,
+                            text = watermarkText,
+                            datePattern = watermarkDatePattern,
+                            onTypeChange = { watermarkType = it },
+                            onTextChange = { watermarkText = it },
+                            onDatePatternChange = { watermarkDatePattern = it },
+                            onSaveAsDefault = if (changedFromDefault) {
+                                {
+                                    AppSettings.updateWatermarkType(watermarkType)
+                                    AppSettings.updateWatermarkText(watermarkText)
+                                    AppSettings.updateWatermarkDatePattern(watermarkDatePattern)
+                                }
+                            } else null
+                        )
+                    }
+
                     Text("Fast Share", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NeuColors.TextSecondary)
                     val shareApps = listOf(
                         ShareApp("Instagram", Color(0xFFE1306C), Icons.Default.CameraAlt),
@@ -276,6 +314,9 @@ fun UnifiedExportScreen(
                             isExporting = true
                             exportError = null
                             ExportOptions.watermark = watermark
+                            ExportOptions.watermarkType = watermarkType
+                            ExportOptions.watermarkText = watermarkText
+                            ExportOptions.watermarkDatePattern = watermarkDatePattern
                             onExport(longSide, format) { result ->
                                 isExporting = false
                                 result.fold(

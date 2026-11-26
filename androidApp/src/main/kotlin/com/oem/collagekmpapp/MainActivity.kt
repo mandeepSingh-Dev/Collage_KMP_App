@@ -13,6 +13,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.content.IntentCompat
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.oem.collagekmpapp.model.SharedImagesPayload
 
 class MainActivity : ComponentActivity() {
@@ -20,38 +23,98 @@ class MainActivity : ComponentActivity() {
     /** Images shared from another app that are waiting for the user to pick a feature (null = nothing pending). */
     private var sharedImages by mutableStateOf<SharedImagesPayload?>(null)
 
+    /** Shortcut action triggered via long-pressing the launcher icon (null = nothing pending). */
+    private var pendingShortcutAction by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        publishDynamicShortcuts()
+
         if (savedInstanceState == null) {
-            // fresh launch (cold start from the share sheet, or from the launcher -> no-op)
+            // fresh launch (cold start from the share sheet, shortcut, or launcher)
             handleShareIntent(intent)
+            pendingShortcutAction = extractShortcutAction(intent)
         } else {
-            // activity recreated (rotation / process death) while the picker was still open -> restore it
+            // activity recreated (rotation / process death) -> restore states
             savedInstanceState.getStringArrayList(KEY_PENDING_SHARE)?.takeIf { it.isNotEmpty() }?.let {
                 sharedImages = SharedImagesPayload(id = System.nanoTime(), uris = it)
             }
+            pendingShortcutAction = savedInstanceState.getString(KEY_PENDING_SHORTCUT_ACTION)
         }
 
         setContent {
             App(
                 sharedImages = sharedImages,
-                onSharedImagesConsumed = { sharedImages = null }
+                onSharedImagesConsumed = { sharedImages = null },
+                shortcutAction = pendingShortcutAction,
+                onShortcutActionConsumed = { pendingShortcutAction = null }
             )
         }
     }
 
-    /** App already running (launchMode="singleTask") and the user shares again from a gallery app. */
+    /** App already running (launchMode="singleTask") and the user triggers a share or shortcut again. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShareIntent(intent)
+        extractShortcutAction(intent)?.let { action ->
+            pendingShortcutAction = action
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         sharedImages?.let { outState.putStringArrayList(KEY_PENDING_SHARE, ArrayList(it.uris)) }
+        pendingShortcutAction?.let { outState.putString(KEY_PENDING_SHORTCUT_ACTION, it) }
+    }
+
+    private fun publishDynamicShortcuts() {
+        try {
+            val gridShortcut = ShortcutInfoCompat.Builder(this, "shortcut_grid_collage_dynamic")
+                .setShortLabel(getString(R.string.shortcut_grid_collage_short))
+                .setLongLabel(getString(R.string.shortcut_grid_collage_long))
+                .setIcon(IconCompat.createWithResource(this, R.drawable.ic_shortcut_grid))
+                .setIntent(
+                    Intent(Intent.ACTION_VIEW, null, this, MainActivity::class.java).apply {
+                        putExtra("shortcut_action", "grid_collage")
+                    }
+                )
+                .build()
+
+            val freestyleShortcut = ShortcutInfoCompat.Builder(this, "shortcut_freestyle_dynamic")
+                .setShortLabel(getString(R.string.shortcut_freestyle_short))
+                .setLongLabel(getString(R.string.shortcut_freestyle_long))
+                .setIcon(IconCompat.createWithResource(this, R.drawable.ic_shortcut_brush))
+                .setIntent(
+                    Intent(Intent.ACTION_VIEW, null, this, MainActivity::class.java).apply {
+                        putExtra("shortcut_action", "freestyle")
+                    }
+                )
+                .build()
+
+            val draftShortcut = ShortcutInfoCompat.Builder(this, "shortcut_resume_draft_dynamic")
+                .setShortLabel(getString(R.string.shortcut_resume_draft_short))
+                .setLongLabel(getString(R.string.shortcut_resume_draft_long))
+                .setIcon(IconCompat.createWithResource(this, R.drawable.ic_shortcut_folder))
+                .setIntent(
+                    Intent(Intent.ACTION_VIEW, null, this, MainActivity::class.java).apply {
+                        putExtra("shortcut_action", "resume_draft")
+                    }
+                )
+                .build()
+
+            ShortcutManagerCompat.setDynamicShortcuts(this, listOf(gridShortcut, freestyleShortcut, draftShortcut))
+        } catch (_: Exception) {
+            // Ignore if shortcuts API is unavailable
+        }
+    }
+
+    private fun extractShortcutAction(intent: Intent?): String? {
+        if (intent == null) return null
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return null
+        return intent.getStringExtra("shortcut_action")
     }
 
     private fun handleShareIntent(intent: Intent?) {
@@ -108,6 +171,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val KEY_PENDING_SHARE = "pending_shared_image_uris"
+        const val KEY_PENDING_SHORTCUT_ACTION = "pending_shortcut_action"
     }
 }
 

@@ -1,5 +1,10 @@
 package com.oem.collagekmpapp.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -26,6 +31,7 @@ import com.oem.collagekmpapp.NeuCard
 import com.oem.collagekmpapp.NeuIconBadge
 import com.oem.collagekmpapp.NeuSwitch
 import com.oem.collagekmpapp.NeuTopBar
+import com.oem.collagekmpapp.WatermarkStyleEditor
 import com.oem.collagekmpapp.formatBytes
 import com.oem.collagekmpapp.model.Screen
 import com.oem.collagekmpapp.neumorphic
@@ -130,10 +136,29 @@ fun SettingsScreen(
                 SettingsSwitchRow(
                     icon = Icons.Default.WaterDrop,
                     title = "Add Watermark",
-                    subtitle = "Watermark exported creations",
+                    subtitle = if (watermarkEnabled) "Stamp: ${AppSettings.watermarkStamp}" else "Watermark exported creations",
                     checked = watermarkEnabled,
                     onCheckedChange = { AppSettings.updateWatermark(it) }
                 )
+                // Custom Watermark / Signature / Date Stamp (only while the watermark is on)
+                AnimatedVisibility(
+                    visible = watermarkEnabled,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column {
+                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                        WatermarkStyleEditor(
+                            type = AppSettings.watermarkType,
+                            text = AppSettings.watermarkText,
+                            datePattern = AppSettings.watermarkDatePattern,
+                            onTypeChange = { AppSettings.updateWatermarkType(it) },
+                            onTextChange = { AppSettings.updateWatermarkText(it) },
+                            onDatePatternChange = { AppSettings.updateWatermarkDatePattern(it) },
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))

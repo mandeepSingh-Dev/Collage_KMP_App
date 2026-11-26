@@ -27,6 +27,9 @@ object AppSettings {
     var imageQuality by mutableFloatStateOf(90f); private set
     var watermark by mutableStateOf(false); private set
     var theme by mutableStateOf(DEFAULT_THEME); private set
+    var watermarkType by mutableStateOf(WatermarkType.APP_NAME); private set          // App Name | Signature | Date
+    var watermarkText by mutableStateOf(DEFAULT_WATERMARK_SIGNATURE); private set     // custom signature, e.g. "@mybrand"
+    var watermarkDatePattern by mutableStateOf(DEFAULT_WATERMARK_DATE_PATTERN); private set
 
     fun attach(kv: KeyValueStore) {
         if (attached && store === kv) return
@@ -39,6 +42,13 @@ object AppSettings {
         watermark = kv.getString(K_WM, "false") == "true"
         theme = kv.getString(K_THEME, DEFAULT_THEME)
         ExportOptions.watermark = watermark
+        watermarkType = WatermarkType.fromKey(kv.getString(K_WM_TYPE, WatermarkType.APP_NAME.key))
+        watermarkText = kv.getString(K_WM_TEXT, DEFAULT_WATERMARK_SIGNATURE)
+        watermarkDatePattern = kv.getString(K_WM_DATE, DEFAULT_WATERMARK_DATE_PATTERN)
+            .takeIf { it in WATERMARK_DATE_PATTERNS } ?: DEFAULT_WATERMARK_DATE_PATTERN
+        ExportOptions.watermarkType = watermarkType
+        ExportOptions.watermarkText = watermarkText
+        ExportOptions.watermarkDatePattern = watermarkDatePattern
     }
 
     fun updateResolution(v: String) { resolution = v; store?.putString(K_RES, v) }
@@ -47,6 +57,21 @@ object AppSettings {
     fun updateImageQuality(v: Float) { imageQuality = v; store?.putString(K_Q, v.toString()) }
     fun updateWatermark(v: Boolean) { watermark = v; ExportOptions.watermark = v; store?.putString(K_WM, v.toString()) }
     fun updateTheme(v: String) { theme = v; store?.putString(K_THEME, v) }
+    fun updateWatermarkType(v: WatermarkType) {
+        watermarkType = v; ExportOptions.watermarkType = v; store?.putString(K_WM_TYPE, v.key)
+    }
+    fun updateWatermarkText(v: String) {
+        val clean = v.replace('\n', ' ').take(WATERMARK_MAX_LENGTH)
+        watermarkText = clean; ExportOptions.watermarkText = clean; store?.putString(K_WM_TEXT, clean)
+    }
+    fun updateWatermarkDatePattern(v: String) {
+        val p = v.takeIf { it in WATERMARK_DATE_PATTERNS } ?: DEFAULT_WATERMARK_DATE_PATTERN
+        watermarkDatePattern = p; ExportOptions.watermarkDatePattern = p; store?.putString(K_WM_DATE, p)
+    }
+
+    /** What the next export will stamp (for subtitles / previews). */
+    val watermarkStamp: String
+        get() = watermarkStampText(watermarkType, watermarkText, watermarkDatePattern)
 
     fun resetToDefaults() {
         updateResolution(DEFAULT_RESOLUTION)
@@ -55,6 +80,9 @@ object AppSettings {
         updateImageQuality(90f)
         updateWatermark(false)
         updateTheme(DEFAULT_THEME)
+        updateWatermarkType(WatermarkType.APP_NAME)
+        updateWatermarkText(DEFAULT_WATERMARK_SIGNATURE)
+        updateWatermarkDatePattern(DEFAULT_WATERMARK_DATE_PATTERN)
     }
 
     // ---- derived values used by the export screens ------------------------------------------
@@ -97,6 +125,9 @@ object AppSettings {
     private const val K_Q = "set_quality"
     private const val K_WM = "set_watermark"
     private const val K_THEME = "set_theme"
+    private const val K_WM_TYPE = "set_watermark_type"
+    private const val K_WM_TEXT = "set_watermark_text"
+    private const val K_WM_DATE = "set_watermark_date_pattern"
 }
 
 /** 14.2 MB / 830 KB / 0 KB */
