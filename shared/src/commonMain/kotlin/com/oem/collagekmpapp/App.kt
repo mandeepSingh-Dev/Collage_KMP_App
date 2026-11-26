@@ -27,6 +27,8 @@ import com.oem.collagekmpapp.ui.SettingsScreen
 import com.oem.collagekmpapp.ui.SinglePhotoEditorScreen
 import com.oem.collagekmpapp.ui.HomeContainer
 import com.oem.collagekmpapp.ui.LocalIsTopScreen
+import com.oem.collagekmpapp.model.SharedImagesPayload
+import com.oem.collagekmpapp.ui.ShareTargetSheet
 
 /** What AnimatedContent animates between: the screen + its back-stack depth (depth tells push from pop). */
 private data class NavEntry(val screen: Screen, val depth: Int)
@@ -55,9 +57,17 @@ private fun navTransition(from: NavEntry, to: NavEntry): ContentTransform = when
     else -> fadeIn(tween(NAV_ANIM_MS)).togetherWith(fadeOut(tween(NAV_ANIM_MS)))
 }
 
+/**
+ * @param sharedImages           images shared into the app from another app (Android share sheet), or null.
+ *                               Defaults keep every existing caller (iOS MainViewController, previews) unchanged.
+ * @param onSharedImagesConsumed called once the user picked a feature or dismissed the picker.
+ */
 @Composable
 @Preview
-fun App() {
+fun App(
+    sharedImages: SharedImagesPayload? = null,
+    onSharedImagesConsumed: () -> Unit = {}
+) {
     MaterialTheme {
         // global, persisted settings (resolution / format / watermark / ...) used by every export screen
         val keyValueStore = rememberKeyValueStore()
@@ -194,6 +204,23 @@ fun App() {
                         }
                     }
                 }
+            }
+        }
+
+        // ---- Share Target: feature picker for images shared from Google Photos / Gallery / ... ----
+        // Held back while Splash / Onboarding run, so the normal startup flow is untouched; it appears as
+        // soon as the user reaches HomeContainer (or immediately, on top of whatever screen is open).
+        val readyForShare = currentScreen !is Screen.Splash && currentScreen !is Screen.Onboarding
+        if (sharedImages != null && sharedImages.uris.isNotEmpty() && readyForShare) {
+            key(sharedImages.id) {   // a new share while the sheet is open resets it
+                ShareTargetSheet(
+                    photoUris = sharedImages.uris,
+                    onSelect = { target ->
+                        backStack.add(target)   // normal push -> slide animation, back returns to previous screen
+                        onSharedImagesConsumed()
+                    },
+                    onDismiss = onSharedImagesConsumed
+                )
             }
         }
     }
