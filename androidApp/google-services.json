@@ -1,0 +1,30 @@
+
+{
+  "project_info": {
+    "project_number": "520551374160",
+    "project_id": "collage-studio-afc33",
+    "storage_bucket": "collage-studio-afc33.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:520551374160:android:9ac1cf314ee86c77902055",
+        "android_client_info": {
+          "package_name": "com.oem.collagekmpapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCnnI4YsbxgmDgm_nasq3zKWPFqAvCrFY0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

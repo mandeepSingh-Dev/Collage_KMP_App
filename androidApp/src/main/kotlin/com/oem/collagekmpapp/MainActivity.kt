@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         publishDynamicShortcuts()
+        com.oem.collagekmpapp.firebase.DeviceTracker.trackDeviceDetails(this)
 
         if (savedInstanceState == null) {
             // fresh launch (cold start from the share sheet, shortcut, or launcher)

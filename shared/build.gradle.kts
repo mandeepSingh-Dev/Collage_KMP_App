@@ -38,6 +38,10 @@ kotlin {
     }
     sourceSets {
         androidMain.dependencies {
+            implementation("com.google.firebase:firebase-analytics:22.2.0")
+            implementation("com.google.firebase:firebase-messaging:24.1.0")
+            implementation("com.google.firebase:firebase-config:22.1.0")
+            implementation("com.google.firebase:firebase-firestore:25.1.2")
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.compose.uiTooling)
             implementation(libs.androidx.activity.compose)
