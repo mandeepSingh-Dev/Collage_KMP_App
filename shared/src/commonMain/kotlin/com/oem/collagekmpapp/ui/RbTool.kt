@@ -276,7 +276,7 @@ fun RemoveBackgroundScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Background Eraser", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
+                title = { Text("Background Eraser", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
                     UndoRedoActions(history)
@@ -312,6 +312,7 @@ fun RemoveBackgroundScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(Color(0xFFF8FAFC))
+                    .navigationBarsPadding()   // keep the controls above the system navigation bar
                     .heightIn(max = 300.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 12.dp),

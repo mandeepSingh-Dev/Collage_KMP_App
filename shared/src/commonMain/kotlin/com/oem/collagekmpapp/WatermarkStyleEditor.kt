@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,11 +78,18 @@ fun WatermarkStyleEditor(
                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = NeuColors.TextMuted) },
                 supportingText = { Text("${text.length}/$WATERMARK_MAX_LENGTH", fontSize = 11.sp) },
                 shape = RoundedCornerShape(14.dp),
+                // explicit text colours -> legible whether the surrounding Material scheme is light or dark
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NeuColors.Accent,
-                    unfocusedBorderColor = Color(0xFFE2E8F0),
-                    focusedContainerColor = Color(0xFFF8FAFC),
-                    unfocusedContainerColor = Color(0xFFF8FAFC)
+                    unfocusedBorderColor = if (NeuColors.isDark) Color(0xFF334155) else Color(0xFFE2E8F0),
+                    focusedContainerColor = if (NeuColors.isDark) Color(0xFF0F172A) else Color(0xFFF8FAFC),
+                    unfocusedContainerColor = if (NeuColors.isDark) Color(0xFF0F172A) else Color(0xFFF8FAFC),
+                    focusedTextColor = NeuColors.TextPrimary,
+                    unfocusedTextColor = NeuColors.TextPrimary,
+                    focusedPlaceholderColor = NeuColors.TextMuted,
+                    unfocusedPlaceholderColor = NeuColors.TextMuted,
+                    focusedSupportingTextColor = NeuColors.TextMuted,
+                    unfocusedSupportingTextColor = NeuColors.TextMuted
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
@@ -130,7 +138,8 @@ fun WatermarkStampPreview(text: String, modifier: Modifier = Modifier) {
             text = text,
             style = watermarkTextStyle(14.sp),
             maxLines = 1,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp)
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(start = 64.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)
         )
     }
 }
@@ -150,7 +159,8 @@ fun BoxScope.WatermarkOverlay(text: String) {
             style = watermarkTextStyle(if (fontSize.value < 7f) 7.sp else fontSize),
             maxLines = 1,
             softWrap = false,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = margin, bottom = margin)
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(start = margin, end = margin, bottom = margin)
         )
     }
 }

@@ -1109,7 +1109,7 @@ fun SinglePhotoEditorScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Photo Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
+                title = { Text("Photo Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
                     UndoRedoActions(history)
@@ -1122,7 +1122,8 @@ fun SinglePhotoEditorScreen(
             )
         },
         bottomBar = {
-            Column(Modifier.background(Color.White)) {
+            // navigationBarsPadding: keeps the tool row above the gesture / 3-button bar (edge-to-edge)
+            Column(Modifier.background(Color.White).navigationBarsPadding()) {
                 Column(
                     Modifier.fillMaxWidth().height(264.dp).background(Color(0xFFF8FAFC))
                         .padding(horizontal = 14.dp, vertical = 8.dp)

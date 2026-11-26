@@ -13,6 +13,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -32,6 +34,16 @@ import com.oem.collagekmpapp.ui.ShareTargetSheet
 
 /** What AnimatedContent animates between: the screen + its back-stack depth (depth tells push from pop). */
 private data class NavEntry(val screen: Screen, val depth: Int)
+
+/**
+ * Keeps screens whose colours are still hard-coded light (editors, Creations, Save Path, Feedback, Onboarding)
+ * on the light Material scheme, so their Material parts (top bars, text fields, buttons) don't turn dark
+ * on top of light panels. Remove the wrapper from a screen once it is themed with NeuColors.
+ */
+@Composable
+fun LightThemeIsland(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = lightColorScheme(), content = content)
+}
 
 private const val NAV_ANIM_MS = 320
 private const val NAV_FADE_MS = 220
@@ -72,7 +84,15 @@ fun App(
     shortcutAction: String? = null,
     onShortcutActionConsumed: () -> Unit = {}
 ) {
-    MaterialTheme {
+    // Dark Material scheme when NeuColors is dark, so dialogs / sheets / text fields / snackbars follow the theme.
+    // Light stays exactly the previous default (MaterialTheme {} == lightColorScheme()).
+    val colorScheme = if (NeuColors.isDark) darkColorScheme(
+        background = NeuColors.Background,
+        surface = NeuColors.Surface,
+        onBackground = NeuColors.TextPrimary,
+        onSurface = NeuColors.TextPrimary
+    ) else lightColorScheme()
+    MaterialTheme(colorScheme = colorScheme) {
         // global, persisted settings (resolution / format / watermark / ...) used by every export screen
         val keyValueStore = rememberKeyValueStore()
         remember(keyValueStore) { AppSettings.attach(keyValueStore); true }
@@ -118,13 +138,15 @@ fun App(
                             )
                         }
                         is Screen.Onboarding -> {
-                            OnboardingScreen(
-                                onFinished = {
-                                    keyValueStore.putString(ONBOARDING_DONE_KEY, "1")
-                                    backStack.clear()
-                                    backStack.add(Screen.HomeContainer)
-                                }
-                            )
+                            LightThemeIsland {
+                                OnboardingScreen(
+                                    onFinished = {
+                                        keyValueStore.putString(ONBOARDING_DONE_KEY, "1")
+                                        backStack.clear()
+                                        backStack.add(Screen.HomeContainer)
+                                    }
+                                )
+                            }
                         }
                         is Screen.HomeContainer -> {
                             HomeContainer(
@@ -152,61 +174,77 @@ fun App(
                             )
                         }
                         is Screen.SavePath -> {
-                            SavePathScreen(
-                                selectedPath = screen.selectedPath,
-                                onBack = { popIfTop(screen) },
-                                onSelect = { path ->
-                                    selectedSavePath = path
-                                    popIfTop(screen)
-                                }
-                            )
+                            LightThemeIsland {
+                                SavePathScreen(
+                                    selectedPath = screen.selectedPath,
+                                    onBack = { popIfTop(screen) },
+                                    onSelect = { path ->
+                                        selectedSavePath = path
+                                        popIfTop(screen)
+                                    }
+                                )
+                            }
                         }
                         is Screen.Feedback -> {
-                            FeedbackScreen(
-                                onBack = { popIfTop(screen) },
-                                onNavigate = { targetScreen -> backStack.add(targetScreen) }
-                            )
+                            LightThemeIsland {
+                                FeedbackScreen(
+                                    onBack = { popIfTop(screen) },
+                                    onNavigate = { targetScreen -> backStack.add(targetScreen) }
+                                )
+                            }
                         }
                         is Screen.Creations -> {
-                            CreationsScreen(
-                                savePath = selectedSavePath,
-                                onNavigate = { targetScreen -> backStack.add(targetScreen) }
-                            )
+                            LightThemeIsland {
+                                CreationsScreen(
+                                    savePath = selectedSavePath,
+                                    onNavigate = { targetScreen -> backStack.add(targetScreen) }
+                                )
+                            }
                         }
                         is Screen.LayoutSelection -> {
                             val count = screen.selectedPhotos.size.coerceAtLeast(1)
                             val defaultLayoutId = com.oem.collagekmpapp.data.LayoutRepository().getLayouts(count).firstOrNull()?.id ?: "layout_2_vertical"
-                            CollageEditorScreen(
-                                layoutId = defaultLayoutId,
-                                selectedPhotos = screen.selectedPhotos,
-                                onBack = { popIfTop(screen) }
-                            )
+                            LightThemeIsland {
+                                CollageEditorScreen(
+                                    layoutId = defaultLayoutId,
+                                    selectedPhotos = screen.selectedPhotos,
+                                    onBack = { popIfTop(screen) }
+                                )
+                            }
                         }
                         is Screen.Editor -> {
-                            CollageEditorScreen(
-                                layoutId = screen.layoutId,
-                                selectedPhotos = screen.selectedPhotos,
-                                templateId = screen.templateId,
-                                onBack = { popIfTop(screen) }
-                            )
+                            LightThemeIsland {
+                                CollageEditorScreen(
+                                    layoutId = screen.layoutId,
+                                    selectedPhotos = screen.selectedPhotos,
+                                    templateId = screen.templateId,
+                                    onBack = { popIfTop(screen) }
+                                )
+                            }
                         }
                         is Screen.FreestyleEditor -> {
-                            FreestyleEditorScreen(
-                                selectedPhotos = screen.selectedPhotos,
-                                onBack = { popIfTop(screen) }
-                            )
+                            LightThemeIsland {
+                                FreestyleEditorScreen(
+                                    selectedPhotos = screen.selectedPhotos,
+                                    onBack = { popIfTop(screen) }
+                                )
+                            }
                         }
                         is Screen.EditPhoto -> {
-                            SinglePhotoEditorScreen(
-                                photoUri = screen.photoUri,
-                                onBack = { popIfTop(screen) }
-                            )
+                            LightThemeIsland {
+                                SinglePhotoEditorScreen(
+                                    photoUri = screen.photoUri,
+                                    onBack = { popIfTop(screen) }
+                                )
+                            }
                         }
                         is Screen.RemoveBackground -> {
-                            RemoveBackgroundScreen(
-                                photoUri = screen.photoUri,
-                                onBack = { popIfTop(screen) }
-                            )
+                            LightThemeIsland {
+                                RemoveBackgroundScreen(
+                                    photoUri = screen.photoUri,
+                                    onBack = { popIfTop(screen) }
+                                )
+                            }
                         }
                     }
                 }

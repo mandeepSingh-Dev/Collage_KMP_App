@@ -59,7 +59,7 @@ fun FeedbackScreen(
         bottomBar = {
             Surface(color = Color(0xFFF8FAFC), tonalElevation = 2.dp) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 28.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {

@@ -23,11 +23,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oem.collagekmpapp.AppSettings
 import com.oem.collagekmpapp.NeuButton
 import com.oem.collagekmpapp.NeuCard
+import com.oem.collagekmpapp.NeuColors
 import com.oem.collagekmpapp.NeuIconBadge
 import com.oem.collagekmpapp.NeuSwitch
 import com.oem.collagekmpapp.NeuTopBar
@@ -40,6 +42,12 @@ import com.oem.collagekmpapp.rememberCacheManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+// Theme-aware colours for Settings. Light values are exactly the previous hard-coded ones.
+private val settingsDividerColor: Color get() = if (NeuColors.isDark) Color.White.copy(alpha = 0.06f) else Color(0xFFF1F5F9)
+private val settingsSelectedRowColor: Color get() = if (NeuColors.isDark) NeuColors.Accent.copy(alpha = 0.14f) else Color(0xFFEFF6FF)
+private val settingsFieldColor: Color get() = if (NeuColors.isDark) Color(0xFF0F172A) else Color(0xFFF8FAFC)
+private val settingsFieldBorderColor: Color get() = if (NeuColors.isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,17 +100,17 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            Box(modifier = Modifier.background(Color(0xFFEDF2F7))) {
+            Box(modifier = Modifier.background(NeuColors.Surface)) {
                 NeuTopBar(title = "Settings", onBack = { onNavigate(Screen.Home) })
             }
         },
-        containerColor = Color(0xFFEDF2F7),
+        containerColor = NeuColors.Surface,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFEDF2F7))
+                .background(NeuColors.Surface)
                 .padding(innerPadding)
                 .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 16.dp),
@@ -118,21 +126,21 @@ fun SettingsScreen(
                     subtitle = selectedResolution,
                     onClick = { showResolutionSheet = true }
                 )
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                 SettingsRow(
                     icon = Icons.Default.FolderOpen,
                     title = "Save Path",
                     subtitle = selectedSavePath,
                     onClick = { onNavigate(Screen.SavePath(selectedSavePath)) }
                 )
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                 SettingsRow(
                     icon = Icons.Default.FilePresent,
                     title = "Export Format",
                     subtitle = exportFormat,
                     onClick = { showFormatSheet = true }
                 )
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                 SettingsSwitchRow(
                     icon = Icons.Default.WaterDrop,
                     title = "Add Watermark",
@@ -147,7 +155,7 @@ fun SettingsScreen(
                     exit = shrinkVertically() + fadeOut()
                 ) {
                     Column {
-                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                        HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                         WatermarkStyleEditor(
                             type = AppSettings.watermarkType,
                             text = AppSettings.watermarkText,
@@ -173,14 +181,14 @@ fun SettingsScreen(
                     subtitle = selectedLanguage,
                     onClick = { showLanguageSheet = true }
                 )
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                 SettingsRow(
                     icon = Icons.Default.DarkMode,
                     title = "App Theme",
                     subtitle = themeMode,
                     onClick = { showThemeSheet = true }
                 )
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                 SettingsRow(
                     icon = Icons.Default.CleaningServices,
                     title = "Clear Temp Cache",
@@ -201,14 +209,14 @@ fun SettingsScreen(
                     subtitle = null,
                     onClick = { onNavigate(Screen.Feedback) }
                 )
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                 SettingsRow(
                     icon = Icons.Default.Description,
                     title = "Terms of Use",
                     subtitle = null,
                     onClick = {}
                 )
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                HorizontalDivider(color = settingsDividerColor, thickness = 1.dp)
                 SettingsRow(
                     icon = Icons.Default.PrivacyTip,
                     title = "Privacy Policy",
@@ -254,7 +262,7 @@ fun SettingsScreen(
             ModalBottomSheet(
                 sheetState = resolutionSheetState,
                 onDismissRequest = { showResolutionSheet = false },
-                containerColor = Color(0xFFEDF2F7),
+                containerColor = NeuColors.Surface,
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(
@@ -267,9 +275,9 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Select Resolution", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                        Text("Select Resolution", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NeuColors.TextPrimary)
                         IconButton(onClick = { showResolutionSheet = false }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = NeuColors.TextSecondary)
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
@@ -302,11 +310,11 @@ fun SettingsScreen(
         if (showFormatSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showFormatSheet = false },
-                containerColor = Color(0xFFEDF2F7),
+                containerColor = NeuColors.Surface,
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-                    Text("Select Export Format", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    Text("Select Export Format", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NeuColors.TextPrimary)
                     Spacer(modifier = Modifier.height(16.dp))
                     listOf("JPEG (Best for Sharing)", "PNG (Lossless)", "WebP (Modern & Compact)").forEach { fmt ->
                         val shortName = fmt.substringBefore(" ")
@@ -330,11 +338,11 @@ fun SettingsScreen(
         if (showThemeSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showThemeSheet = false },
-                containerColor = Color(0xFFEDF2F7),
+                containerColor = NeuColors.Surface,
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-                    Text("App Theme", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    Text("App Theme", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NeuColors.TextPrimary)
                     Spacer(modifier = Modifier.height(16.dp))
                     listOf("System Default", "Light Mode", "Dark Mode").forEach { th ->
                         ResolutionOptionCard(
@@ -357,7 +365,7 @@ fun SettingsScreen(
         if (showLanguageSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showLanguageSheet = false },
-                containerColor = Color(0xFFEDF2F7),
+                containerColor = NeuColors.Surface,
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 Column(
@@ -370,9 +378,9 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Select Language", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                        Text("Select Language", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NeuColors.TextPrimary)
                         IconButton(onClick = { showLanguageSheet = false }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF64748B))
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = NeuColors.TextSecondary)
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
@@ -381,13 +389,17 @@ fun SettingsScreen(
                         value = languageQuery,
                         onValueChange = { languageQuery = it },
                         placeholder = { Text("Search language...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF94A3B8)) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = NeuColors.TextMuted) },
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF2563EB),
-                            unfocusedBorderColor = Color(0xFFE2E8F0),
-                            focusedContainerColor = Color(0xFFF8FAFC),
-                            unfocusedContainerColor = Color(0xFFF8FAFC)
+                            focusedBorderColor = NeuColors.Accent,
+                            unfocusedBorderColor = settingsFieldBorderColor,
+                            focusedContainerColor = settingsFieldColor,
+                            unfocusedContainerColor = settingsFieldColor,
+                            focusedTextColor = NeuColors.TextPrimary,
+                            unfocusedTextColor = NeuColors.TextPrimary,
+                            focusedPlaceholderColor = NeuColors.TextMuted,
+                            unfocusedPlaceholderColor = NeuColors.TextMuted
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -433,7 +445,7 @@ fun SettingsSectionHeader(title: String) {
             text = title,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            color = Color(0xFF64748B)
+            color = NeuColors.TextSecondary
         )
     }
 }
@@ -466,31 +478,40 @@ fun SettingsRow(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            // title side may shrink, so a long value never pushes the chevron off screen
+            modifier = Modifier.weight(1f, fill = false)
         ) {
             NeuIconBadge(icon = icon, size = 38.dp)
             Text(
                 text = title,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF1E293B)
+                color = NeuColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(start = 8.dp)
         ) {
             if (subtitle != null) {
                 Text(
                     text = subtitle,
                     fontSize = 13.sp,
-                    color = Color(0xFF94A3B8)
+                    color = NeuColors.TextMuted,
+                    // long values (save path, "Standard Resolution (720p)", ...) end in "…"
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 160.dp)
                 )
             }
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
-                tint = Color(0xFF94A3B8),
+                tint = NeuColors.TextMuted,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -524,18 +545,24 @@ fun SettingsSwitchRow(
                     text = title,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF1E293B)
+                    color = NeuColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (subtitle != null) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = subtitle,
                         fontSize = 12.sp,
-                        color = Color(0xFF94A3B8)
+                        color = NeuColors.TextMuted,
+                        // e.g. "Stamp: @a-very-long-signature" -> max 2 lines, then "…"
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
         }
+        Spacer(Modifier.width(8.dp))
         NeuSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
@@ -557,7 +584,7 @@ fun ResolutionOptionCard(
                 if (selected) Modifier.neumorphicInset(shape = shape)
                 else Modifier.neumorphic(shape = shape, elevation = if (pressed) 2.dp else 6.dp, pressed = pressed)
             )
-            .then(if (selected) Modifier.border(1.5.dp, Color(0xFF2563EB), shape) else Modifier)
+            .then(if (selected) Modifier.border(1.5.dp, NeuColors.Accent, shape) else Modifier)
             .clip(shape)
             .clickable(interactionSource = interaction, indication = null) { onClick() }
             .padding(16.dp)
@@ -568,14 +595,14 @@ fun ResolutionOptionCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                Text(text = title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NeuColors.TextPrimary)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(text = subtitle, fontSize = 12.sp, color = Color(0xFF64748B))
+                Text(text = subtitle, fontSize = 12.sp, color = NeuColors.TextSecondary)
             }
             RadioButton(
                 selected = selected,
                 onClick = onClick,
-                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2563EB))
+                colors = RadioButtonDefaults.colors(selectedColor = NeuColors.Accent)
             )
         }
     }
@@ -591,7 +618,7 @@ fun LanguageOptionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) Color(0xFFEFF6FF) else Color.Transparent)
+            .background(if (selected) settingsSelectedRowColor else Color.Transparent)
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -601,13 +628,13 @@ fun LanguageOptionRow(
             text = language,
             fontSize = 15.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) Color(0xFF2563EB) else Color(0xFF1E293B)
+            color = if (selected) NeuColors.Accent else NeuColors.TextPrimary
         )
         if (selected) {
             Icon(
                 imageVector = Icons.Default.CheckCircle,
                 contentDescription = null,
-                tint = Color(0xFF2563EB),
+                tint = NeuColors.Accent,
                 modifier = Modifier.size(20.dp)
             )
         }

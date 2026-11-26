@@ -95,7 +95,12 @@ fun UnifiedExportScreen(
                     actions = {
                         if (onHome != null) {
                             TextButton(onClick = onHome) {
-                                Text("Home", fontWeight = FontWeight.Bold, color = NeuColors.Accent, fontSize = 15.sp)
+                                Text(
+                                    "Home",
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeuColors.Accent,
+                                    fontSize = 15.sp
+                                )
                             }
                         }
                     }
@@ -118,19 +123,37 @@ fun UnifiedExportScreen(
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier.padding(vertical = 8.dp)
                 ) {
-                    Surface(shape = CircleShape, color = Color(0xFF22C55E), modifier = Modifier.size(28.dp)) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFF22C55E),
+                        modifier = Modifier.size(28.dp)
+                    ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Saved to Gallery!", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
+                    Text(
+                        "Saved to Gallery!",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF16A34A)
+                    )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
             // ---- preview card (neumorphic)
-            NeuCard(shape = RoundedCornerShape(22.dp), elevation = 9.dp, contentPadding = PaddingValues(10.dp)) {
+            NeuCard(
+                shape = RoundedCornerShape(22.dp),
+                elevation = 9.dp,
+                contentPadding = PaddingValues(10.dp)
+            ) {
                 Box(
                     modifier = Modifier
                         .width(previewWidth)
@@ -163,10 +186,23 @@ fun UnifiedExportScreen(
                 contentPadding = PaddingValues(20.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("Export Settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NeuColors.TextPrimary)
+                    Text(
+                        "Export Settings",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NeuColors.TextPrimary
+                    )
 
-                    Text("Quality Presets", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NeuColors.TextSecondary)
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Quality Presets",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NeuColors.TextSecondary
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         val qualities = listOf(
                             Triple(720, QualityPreset("Standard (720p)", "1.2 MB"), "720p"),
                             Triple(1080, QualityPreset("High (1080p)", "2.8 MB"), "1080p"),
@@ -183,12 +219,21 @@ fun UnifiedExportScreen(
                                         if (isSelected) Modifier.neumorphicInset(shape)
                                         else Modifier.neumorphic(shape, elevation = 5.dp)
                                     )
-                                    .then(if (isSelected) Modifier.border(1.5.dp, NeuColors.Accent, shape) else Modifier)
+                                    .then(
+                                        if (isSelected) Modifier.border(
+                                            1.5.dp,
+                                            NeuColors.Accent,
+                                            shape
+                                        ) else Modifier
+                                    )
                                     .clip(shape)
                                     .clickable { longSide = px },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
                                     Text(
                                         text = preset.title.substringBefore(" "),
                                         fontSize = 11.sp,
@@ -196,18 +241,28 @@ fun UnifiedExportScreen(
                                         color = if (isSelected) NeuColors.Accent else NeuColors.TextPrimary
                                     )
                                     Text(
-                                        text = preset.title.substringAfter("(").substringBefore(")"),
+                                        text = preset.title.substringAfter("(")
+                                            .substringBefore(")"),
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isSelected) NeuColors.Accent else NeuColors.TextPrimary
                                     )
-                                    Text(preset.size, fontSize = 10.sp, color = NeuColors.TextSecondary)
+                                    Text(
+                                        preset.size,
+                                        fontSize = 10.sp,
+                                        color = NeuColors.TextSecondary
+                                    )
                                 }
                             }
                         }
                     }
 
-                    Text("Format", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NeuColors.TextSecondary)
+                    Text(
+                        "Format",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NeuColors.TextSecondary
+                    )
                     NeuSegmented(
                         options = if (forcePng) listOf("PNG") else listOf("JPG", "PNG", "WEBP"),
                         selected = format,
@@ -221,11 +276,24 @@ fun UnifiedExportScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
                             NeuIconBadge(Icons.Default.WaterDrop, size = 36.dp)
                             Column {
-                                Text("Add Watermark", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NeuColors.TextPrimary)
-                                Text("Small label in the corner", fontSize = 11.sp, color = NeuColors.TextMuted)
+                                Text(
+                                    "Add Watermark",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = NeuColors.TextPrimary
+                                )
+                                Text(
+                                    "Small label in the corner",
+                                    fontSize = 11.sp,
+                                    color = NeuColors.TextMuted
+                                )
                             }
                         }
                         NeuSwitch(checked = watermark, onCheckedChange = { watermark = it })
@@ -257,14 +325,23 @@ fun UnifiedExportScreen(
                         )
                     }
 
-                    Text("Fast Share", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NeuColors.TextSecondary)
+                    Text(
+                        "Fast Share",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NeuColors.TextSecondary
+                    )
                     val shareApps = listOf(
                         ShareApp("Instagram", Color(0xFFE1306C), Icons.Default.CameraAlt),
                         ShareApp("WhatsApp", Color(0xFF22C55E), Icons.AutoMirrored.Filled.Chat),
                         ShareApp("Facebook", Color(0xFF2563EB), Icons.Default.Share),
                         ShareApp("Stories", Color(0xFFD946EF), Icons.Default.AutoAwesome),
                         ShareApp("Snapchat", Color(0xFFEAB308), Icons.Default.Star),
-                        ShareApp("TikTok", Color(0xFF0F172A), Icons.Default.MusicNote),
+                        ShareApp(
+                            "TikTok",
+                            if (NeuColors.isDark) Color(0xFFE2E8F0) else Color(0xFF0F172A),
+                            Icons.Default.MusicNote
+                        ),   // visible on the dark badge,
                         ShareApp("More", Color(0xFF64748B), Icons.Default.MoreHoriz)
                     )
                     LazyVerticalGrid(
@@ -278,12 +355,28 @@ fun UnifiedExportScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(14.dp))
-                                    .clickable { sharer.shareToApp(app.name, exportedUri ?: shareFallbackUri) }
+                                    .clickable {
+                                        sharer.shareToApp(
+                                            app.name,
+                                            exportedUri ?: shareFallbackUri
+                                        )
+                                    }
                                     .padding(4.dp)
                             ) {
-                                NeuIconBadge(app.icon, tint = app.color, size = 48.dp, contentDescription = app.name)
+                                NeuIconBadge(
+                                    app.icon,
+                                    tint = app.color,
+                                    size = 48.dp,
+                                    contentDescription = app.name
+                                )
                                 Spacer(modifier = Modifier.height(6.dp))
-                                Text(app.name, fontSize = 11.sp, color = Color(0xFF334155), fontWeight = FontWeight.Medium)
+                                Text(
+                                    app.name,
+                                    fontSize = 11.sp,
+                                    color = NeuColors.TextSecondary,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
                             }
                         }
                     }
@@ -296,15 +389,35 @@ fun UnifiedExportScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Copy Link  collage_studio_2026_11...", fontSize = 12.sp, color = NeuColors.TextSecondary, maxLines = 1, modifier = Modifier.weight(1f))
+                        Text(
+                            "Copy Link  collage_studio_2026_11...",
+                            fontSize = 12.sp,
+                            color = NeuColors.TextSecondary,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
                         TextButton(onClick = { copiedToast = true }) {
-                            Text("Copy", fontWeight = FontWeight.Bold, color = NeuColors.Accent, fontSize = 13.sp)
+                            Text(
+                                "Copy",
+                                fontWeight = FontWeight.Bold,
+                                color = NeuColors.Accent,
+                                fontSize = 13.sp
+                            )
                         }
                     }
-                    if (copiedToast) Text("Link copied to clipboard!", fontSize = 11.sp, color = Color(0xFF16A34A))
+                    if (copiedToast) Text(
+                        "Link copied to clipboard!",
+                        fontSize = 11.sp,
+                        color = Color(0xFF16A34A)
+                    )
 
                     if (exportError != null) {
-                        Text(exportError ?: "Export failed", fontSize = 12.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Medium)
+                        Text(
+                            exportError ?: "Export failed",
+                            fontSize = 12.sp,
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.Medium
+                        )
                     }
 
                     // ---- Save to Gallery -> MediaStore (/Pictures/CollageStudio) -> open in Gallery
@@ -335,11 +448,25 @@ fun UnifiedExportScreen(
                         modifier = Modifier.fillMaxWidth().height(54.dp)
                     ) {
                         if (isExporting) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text("Exporting High-Res Image...", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            Text(
+                                "Exporting High-Res Image...",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = Color.White
+                            )
                         } else {
-                            Text("Save to Gallery", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+                            Text(
+                                "Save to Gallery",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color.White
+                            )
                         }
                     }
 
@@ -348,9 +475,19 @@ fun UnifiedExportScreen(
                             onClick = { exportedUri?.let { openGallery(it) } },
                             modifier = Modifier.fillMaxWidth().height(48.dp)
                         ) {
-                            Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = NeuColors.Accent, modifier = Modifier.size(20.dp))
+                            Icon(
+                                Icons.Default.PhotoLibrary,
+                                contentDescription = null,
+                                tint = NeuColors.Accent,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Spacer(Modifier.width(8.dp))
-                            Text("Open in Gallery", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = NeuColors.Accent)
+                            Text(
+                                "Open in Gallery",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = NeuColors.Accent
+                            )
                         }
                     }
                 }

@@ -697,7 +697,7 @@ fun CollageEditorScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Collage Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
+                title = { Text("Collage Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = requestBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -720,7 +720,8 @@ fun CollageEditorScreen(
             )
         },
         bottomBar = {
-            Column(modifier = Modifier.background(Color.White)) {
+            // navigationBarsPadding: keeps the tool row above the gesture / 3-button bar (edge-to-edge)
+            Column(modifier = Modifier.background(Color.White).navigationBarsPadding()) {
                 // Photo strip: view / select / add / replace / reorder / delete the photos of the collage
                 CollagePhotoStrip(
                     photos = currentPhotos,

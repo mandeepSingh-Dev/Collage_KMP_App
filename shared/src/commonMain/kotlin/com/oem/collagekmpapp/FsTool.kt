@@ -835,7 +835,7 @@ fun FreestyleEditorScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Freestyle Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
+                title = { Text("Freestyle Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
                     UndoRedoActions(history)
@@ -849,7 +849,8 @@ fun FreestyleEditorScreen(
             )
         },
         bottomBar = {
-            Column(Modifier.background(Color.White)) {
+            // navigationBarsPadding: keeps the tool row above the gesture / 3-button bar (edge-to-edge)
+            Column(Modifier.background(Color.White).navigationBarsPadding()) {
                 Column(
                     Modifier.fillMaxWidth().height(264.dp).background(Color(0xFFF8FAFC))
                         .padding(horizontal = 14.dp, vertical = 8.dp)

@@ -56,7 +56,7 @@ fun LayoutSelectionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Layout Studio ($count Photos)", fontWeight = FontWeight.Bold) },
+                title = { Text("Layout Studio ($count Photos)", fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")

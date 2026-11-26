@@ -85,7 +85,7 @@ fun SavePathScreen(
         },
         bottomBar = {
             Surface(color = Color(0xFFF8FAFC), shadowElevation = 4.dp) {
-                Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 16.dp)) {
                     OutlinedButton(
                         onClick = { showCreateFolder = true },
                         modifier = Modifier.fillMaxWidth().height(52.dp),
