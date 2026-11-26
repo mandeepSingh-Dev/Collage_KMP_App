@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.oem.collagekmpapp.AdjustTools
+import com.oem.collagekmpapp.BackHandler
 import com.oem.collagekmpapp.FilterPickerPanel
 import com.oem.collagekmpapp.OverlayMetrics
 import com.oem.collagekmpapp.UndoRedoActions
@@ -587,17 +589,126 @@ fun CollageEditorScreen(
         }
     }
 
+    // ---------------------------------------------------------------- Save as Custom Template
+    // Captures the current LOOK (ratio, spacing, background, filter, adjustments, emoji stickers and text) as a preset
+    // in TemplateRepository ("My Presets"). Photos, photo stickers, drawings and a background photo are not part of it.
+    var showSaveTemplateDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val snackScope = rememberCoroutineScope()
+    val presetStore = com.oem.collagekmpapp.rememberKeyValueStore()
+    remember(presetStore) { com.oem.collagekmpapp.data.TemplateRepository.attach(presetStore); true }
+
+    fun buildCustomTemplate(title: String): com.oem.collagekmpapp.data.TemplateItem {
+        val cw = if (canvasSizePx.width > 0) canvasSizePx.width.toFloat() else 1000f
+        val ch = if (canvasSizePx.height > 0) canvasSizePx.height.toFloat() else 1000f
+        // same normalisation as the export below: offsets are relative to the canvas centre
+        fun nx(o: Offset) = ((cw / 2f + o.x) / cw).coerceIn(0f, 1f)
+        fun ny(o: Offset) = ((ch / 2f + o.y) / ch).coerceIn(0f, 1f)
+        fun argb(c: Color) = c.toArgb().toLong() and 0xFFFFFFFFL
+        val emojis = overlayItems.filterIsInstance<OverlayItem.Emoji>().mapIndexed { i, e ->
+            ProjectOverlayItem.Emoji(id = "tpl_dec_user_$i", emoji = e.emoji, x = nx(e.offset), y = ny(e.offset), rotation = e.rotation, scale = e.scale)
+        }
+        val texts = overlayItems.filterIsInstance<OverlayItem.Text>().mapIndexed { i, t ->
+            ProjectTextLayer(
+                id = "tpl_txt_user_$i", text = t.text, x = nx(t.offset), y = ny(t.offset), fontName = t.font,
+                colorLong = argb(t.textColor), rotation = t.rotation, scale = t.scale, compact = true
+            )
+        } + (if (collageText.isNotBlank()) listOf(
+            ProjectTextLayer(
+                id = "tpl_txt_user_legacy", text = collageText, x = nx(textOffset), y = ny(textOffset),
+                fontName = selectedFont, colorLong = argb(textColor), compact = true
+            )
+        ) else emptyList())
+        val layoutsForCount = layoutRepo.getLayouts(currentPhotos.size.coerceAtLeast(1))
+        return com.oem.collagekmpapp.data.TemplateRepository.newCustomTemplate(
+            title = title,
+            ratioW = aspectRatio.widthRatio, ratioH = aspectRatio.heightRatio,
+            // templates are applied with ratio * 360 (see borderSettings above), so store value / 360 to round-trip exactly
+            outer = borderSettings.outerSpacing / 360f,
+            inner = borderSettings.spacing / 360f,
+            corner = borderSettings.cornerRadius / 360f,
+            backgroundColor = argb(canvasBgColor),
+            gradient = canvasBgGradientColors.map { argb(it) },
+            filter = selectedPreset, filterIntensity = filterIntensity,
+            adjust = adjustValues.filterValues { it != 0f },
+            texts = texts, emojis = emojis,
+            photos = currentPhotos.size,
+            layoutIndex = layoutsForCount.indexOfFirst { it.id == currentLayoutId }.coerceAtLeast(0)
+        )
+    }
+
+    if (showSaveTemplateDialog) {
+        var presetTitle by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showSaveTemplateDialog = false },
+            icon = { Icon(Icons.Default.BookmarkAdd, contentDescription = null, tint = Color(0xFF2563EB)) },
+            title = { Text("Save as Template") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Saves this collage's ratio, borders, background, filter, adjustments, stickers and text to My Presets.",
+                        fontSize = 13.sp, color = Color(0xFF64748B)
+                    )
+                    OutlinedTextField(
+                        value = presetTitle,
+                        onValueChange = { presetTitle = it.take(32) },
+                        label = { Text("Preset name") },
+                        placeholder = { Text("e.g. Summer Pastel") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = presetTitle.isNotBlank(),
+                    onClick = {
+                        val item = buildCustomTemplate(presetTitle.trim())
+                        com.oem.collagekmpapp.data.TemplateRepository.addCustom(item)
+                        showSaveTemplateDialog = false
+                        snackScope.launch { snackbarHostState.showSnackbar("Saved “${item.title}” to My Presets") }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showSaveTemplateDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    // ---------------------------------------------------------------- Unsaved-changes guardrail
+    // Top-bar arrow AND system back/gesture both go through requestBack(). No edits -> exit straight away;
+    // edits in the undo history -> confirm first. (Export screen's own Home / Create-another still exit directly.)
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val requestBack: () -> Unit = {
+        when {
+            showExportDialog -> showExportDialog = false          // back on the export overlay just closes it
+            history.canUndo -> showDiscardDialog = true
+            else -> onBack()
+        }
+    }
+    BackHandler(enabled = LocalIsTopScreen.current) { requestBack() }
+    if (showDiscardDialog) {
+        DiscardChangesDialog(
+            onCancel = { showDiscardDialog = false },
+            onDiscard = { showDiscardDialog = false; onBack() }
+        )
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Collage Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = requestBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     UndoRedoActions(history)
+                    // Save the current look as a custom template ("My Presets")
+                    IconButton(onClick = { showSaveTemplateDialog = true }) {
+                        Icon(Icons.Default.BookmarkAdd, contentDescription = "Save as Template")
+                    }
                     Button(
                         onClick = { showExportDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),

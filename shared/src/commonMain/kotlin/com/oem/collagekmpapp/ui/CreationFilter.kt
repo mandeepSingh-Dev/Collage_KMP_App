@@ -1,8 +1,24 @@
 package com.oem.collagekmpapp.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -50,6 +66,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
+import com.oem.collagekmpapp.BackHandler
+import com.oem.collagekmpapp.data.CreationDateRange
+import com.oem.collagekmpapp.data.CreationProject
+import com.oem.collagekmpapp.data.ProjectEditor
+import com.oem.collagekmpapp.data.ProjectRestore
+import com.oem.collagekmpapp.data.deleteBatch
+import com.oem.collagekmpapp.data.platformNowMillis
+import com.oem.collagekmpapp.data.platformUtcOffsetMillis
+import com.oem.collagekmpapp.data.rememberMultiImageSharer
 import com.oem.collagekmpapp.data.Creation
 import com.oem.collagekmpapp.data.CreationKind
 import com.oem.collagekmpapp.data.rememberCreationsRepository
@@ -101,6 +126,18 @@ private fun CreationKind.icon(): ImageVector = when (this) {
     CreationKind.REMOVE_BG -> Icons.Default.ContentCut
 }
 
+/** Where a saved project re-opens: the editor it was made in, with the original photos (and layout / template). */
+private fun CreationProject.toScreen(): Screen = when (editor) {
+    ProjectEditor.COLLAGE -> when {
+        layoutId != null && templateId != null -> Screen.Editor(layoutId, photos, templateId)
+        layoutId != null -> Screen.Editor(layoutId, photos)
+        else -> Screen.LayoutSelection(photos)
+    }
+    ProjectEditor.FREESTYLE -> Screen.FreestyleEditor(photos)
+    ProjectEditor.PHOTO -> Screen.EditPhoto(photos.first())
+    ProjectEditor.REMOVE_BG -> Screen.RemoveBackground(photos.first())
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreationsScreen(
@@ -126,6 +163,36 @@ fun CreationsScreen(
     var viewerStartId by remember { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<Creation?>(null) }
 
+    // ---- batch selection (long-press a card)
+    var isBatchMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var batchDeleteOpen by remember { mutableStateOf(false) }
+    val multiSharer = rememberMultiImageSharer()
+    val haptic = LocalHapticFeedback.current
+
+    fun exitBatch() {
+        isBatchMode = false
+        selectedIds = emptySet()
+    }
+
+    fun toggleSelected(id: String) {
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+
+    // ---- date range filter
+    var dateRange by remember { mutableStateOf(CreationDateRange.ALL_TIME) }
+
+    /** Parses the project sidecar and opens the editor it came from; the editor restores the rest via ProjectRestore. */
+    fun reEdit(c: Creation) {
+        val project = c.projectJson?.let { CreationProject.parse(it) }
+        if (project == null) {
+            scope.launch { snackbar.showSnackbar("This project can't be opened – the project file is damaged or from a newer version.") }
+            return
+        }
+        ProjectRestore.offer(project)
+        onNavigate(project.toScreen())
+    }
+
     fun reload() {
         scope.launch {
             loading = true
@@ -138,6 +205,13 @@ fun CreationsScreen(
     }
     LaunchedEffect(repo) { reload() }
 
+    LaunchedEffect(items) {
+        val ids = items.mapTo(HashSet()) { it.id }
+        selectedIds = selectedIds.filterTo(HashSet()) { it in ids }
+        if (items.isEmpty()) exitBatch()
+    }
+    BackHandler(enabled = isBatchMode && LocalIsTopScreen.current) { exitBatch() }
+
     val createPicker = rememberGalleryPicker { uris ->
         if (uris.size < 2) {
             scope.launch { snackbar.showSnackbar("Select at least 2 photos to create a collage.") }
@@ -146,10 +220,18 @@ fun CreationsScreen(
         }
     }
 
-    val visible = remember(items, filter, sort, query) {
+    val visible = remember(items, filter, sort, query, dateRange) {
+        val now = platformNowMillis()
+        val utcOffset = platformUtcOffsetMillis(now)
         items
             .filter { filter.kind == null || it.kind == filter.kind }
-            .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
+            .filter { dateRange.matches(it.dateMillis, now, utcOffset) }
+            .filter {
+                // search by file name, or by the date shown on the card ("24 Nov", "Nov 2026", "2026")
+                query.isBlank() ||
+                        it.name.contains(query.trim(), ignoreCase = true) ||
+                        formatDate(it.dateMillis).contains(query.trim(), ignoreCase = true)
+            }
             .let { list ->
                 when (sort) {
                     CreationSort.NEWEST -> list.sortedByDescending { it.dateMillis }
@@ -170,69 +252,86 @@ fun CreationsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Column(Modifier.background(NeuBg)) {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = NeuBg),
-                    navigationIcon = {
-                        if (searching) {
-                            IconButton(onClick = { searching = false; query = "" }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close search")
+                if (isBatchMode) {
+                    BatchActionBar(
+                        selectedCount = selectedIds.size,
+                        allVisibleSelected = visible.isNotEmpty() && visible.all { it.id in selectedIds },
+                        onClose = { exitBatch() },
+                        onToggleSelectAll = { selectAll ->
+                            val ids = visible.map { it.id }
+                            selectedIds = if (selectAll) selectedIds + ids else selectedIds - ids.toSet()
+                        },
+                        onShare = {
+                            val uris = items.filter { it.id in selectedIds }.map { it.uri }
+                            runCatching { multiSharer.share(uris) }
+                                .onFailure { scope.launch { snackbar.showSnackbar("Couldn't open the share sheet.") } }
+                        },
+                        onDelete = { batchDeleteOpen = true }
+                    )
+                } else
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = NeuBg),
+                        navigationIcon = {
+                            if (searching) {
+                                IconButton(onClick = { searching = false; query = "" }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close search")
+                                }
                             }
-                        }
-                    },
-                    title = {
-                        if (searching) {
-                            TextField(
-                                value = query,
-                                onValueChange = { query = it },
-                                singleLine = true,
-                                placeholder = { Text("Search by file name") },
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent
-                                ),
-                                modifier = Modifier.fillMaxWidth().focusRequester(searchFocus)
-                            )
-                        } else {
-                            Column {
-                                Text("My Creations", fontSize = 21.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B), letterSpacing = (-0.3).sp)
-                                if (items.isNotEmpty()) {
-                                    Text(
-                                        if (items.size == 1) "1 creation" else "${items.size} creations",
-                                        fontSize = 11.sp, color = Color(0xFF94A3B8)
-                                    )
+                        },
+                        title = {
+                            if (searching) {
+                                TextField(
+                                    value = query,
+                                    onValueChange = { query = it },
+                                    singleLine = true,
+                                    placeholder = { Text("Search by file name") },
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent
+                                    ),
+                                    modifier = Modifier.fillMaxWidth().focusRequester(searchFocus)
+                                )
+                            } else {
+                                Column {
+                                    Text("My Creations", fontSize = 21.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B), letterSpacing = (-0.3).sp)
+                                    if (items.isNotEmpty()) {
+                                        Text(
+                                            if (items.size == 1) "1 creation" else "${items.size} creations",
+                                            fontSize = 11.sp, color = Color(0xFF94A3B8)
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        actions = {
+                            if (searching) {
+                                if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
+                                    Icon(Icons.Default.Close, "Clear")
+                                }
+                            } else {
+                                IconButton(onClick = { searching = true }) { Icon(Icons.Default.Search, "Search") }
+                            }
+                            Box {
+                                IconButton(onClick = { sortMenuOpen = true }) {
+                                    Icon(Icons.AutoMirrored.Filled.Sort, "Sort")
+                                }
+                                DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                                    CreationSort.entries.forEach { s ->
+                                        DropdownMenuItem(
+                                            text = { Text(s.label) },
+                                            leadingIcon = {
+                                                if (sort == s) Icon(Icons.Default.Check, null)
+                                                else Spacer(Modifier.size(24.dp))
+                                            },
+                                            onClick = { sort = s; sortMenuOpen = false }
+                                        )
+                                    }
                                 }
                             }
                         }
-                    },
-                    actions = {
-                        if (searching) {
-                            if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Default.Close, "Clear")
-                            }
-                        } else {
-                            IconButton(onClick = { searching = true }) { Icon(Icons.Default.Search, "Search") }
-                        }
-                        Box {
-                            IconButton(onClick = { sortMenuOpen = true }) {
-                                Icon(Icons.AutoMirrored.Filled.Sort, "Sort")
-                            }
-                            DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
-                                CreationSort.entries.forEach { s ->
-                                    DropdownMenuItem(
-                                        text = { Text(s.label) },
-                                        leadingIcon = {
-                                            if (sort == s) Icon(Icons.Default.Check, null)
-                                            else Spacer(Modifier.size(24.dp))
-                                        },
-                                        onClick = { sort = s; sortMenuOpen = false }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                )
+                    )
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -246,12 +345,23 @@ fun CreationsScreen(
                         )
                     }
                 }
+                // date range chips
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.DateRange, contentDescription = "Date range", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                    CreationDateRange.entries.forEach { r ->
+                        MinimalFilterPill(label = r.label, selected = dateRange == r, onClick = { dateRange = r })
+                    }
+                }
             }
         }
     ) { inner ->
         Box(Modifier.fillMaxSize().padding(inner)) {
             when {
-                loading && items.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                loading && items.isEmpty() -> CreationsShimmerGrid()
 
                 loadError != null -> MessageState(
                     icon = Icons.Default.BrokenImage,
@@ -268,7 +378,7 @@ fun CreationsScreen(
                     title = "Nothing here",
                     body = "No creations match your search or filter.",
                     actionLabel = "Show all",
-                    onAction = { filter = CreationFilter.ALL; query = ""; searching = false }
+                    onAction = { filter = CreationFilter.ALL; dateRange = CreationDateRange.ALL_TIME; query = ""; searching = false }
                 )
 
                 else -> LazyVerticalGrid(
@@ -281,9 +391,16 @@ fun CreationsScreen(
                     items(visible, key = { it.id }) { c ->
                         CreationCard(
                             c,
-                            onClick = { sheetFor = c },
+                            onClick = { if (isBatchMode) toggleSelected(c.id) else sheetFor = c },
                             onShare = { sharer.shareToApp("More", c.uri) },
-                            onDelete = { deleteTarget = c }
+                            onDelete = { deleteTarget = c },
+                            selected = c.id in selectedIds,
+                            batchMode = isBatchMode,
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (isBatchMode) toggleSelected(c.id)
+                                else { isBatchMode = true; selectedIds = setOf(c.id) }
+                            }
                         )
                     }
                     item(span = { GridItemSpan(maxLineSpan) }) {
@@ -326,6 +443,11 @@ fun CreationsScreen(
                     }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp), thickness = 0.5.dp, color = Color(0xFFE5E7EB))
+                if (c.projectJson != null) {
+                    SheetAction(Icons.Default.EditNote, "Re-edit Project", tint = Color(0xFF2563EB)) {
+                        sheetFor = null; reEdit(c)
+                    }
+                }
                 SheetAction(Icons.Default.Fullscreen, "View full screen") {
                     sheetFor = null; viewerStartId = c.id
                 }
@@ -385,6 +507,75 @@ fun CreationsScreen(
             dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
         )
     }
+
+    // ============================================================ batch delete confirmation
+    if (batchDeleteOpen) {
+        val targets = items.filter { it.id in selectedIds }
+        val n = targets.size
+        AlertDialog(
+            onDismissRequest = { batchDeleteOpen = false },
+            icon = { Icon(Icons.Default.Delete, null, tint = Color(0xFFDC2626)) },
+            title = { Text(if (n == 1) "Delete 1 creation?" else "Delete $n creations?") },
+            text = { Text(if (n == 1) "This image will be permanently removed from your device. This can't be undone." else "These $n images will be permanently removed from your device. This can't be undone.") },
+            confirmButton = {
+                TextButton(
+                    enabled = n > 0,
+                    onClick = {
+                        batchDeleteOpen = false
+                        scope.launch {
+                            val result = repo.deleteBatch(targets)
+                            items = items.filterNot { it.id in result.deletedIds }
+                            exitBatch()
+                            snackbar.showSnackbar(
+                                when {
+                                    result.allSucceeded -> if (n == 1) "Creation deleted" else "$n creations deleted"
+                                    result.deletedIds.isEmpty() -> result.failed.first().second.message ?: "Couldn't delete these images."
+                                    else -> "Deleted ${result.deletedIds.size} of $n – ${result.failed.size} couldn't be removed."
+                                }
+                            )
+                        }
+                    }
+                ) { Text("Delete", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { batchDeleteOpen = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+/** Contextual top bar while batch-selecting: count, Select all / Deselect all, Share, Delete. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BatchActionBar(
+    selectedCount: Int,
+    allVisibleSelected: Boolean,
+    onClose: () -> Unit,
+    onToggleSelectAll: (selectAll: Boolean) -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit
+) {
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = NeuBg),
+        navigationIcon = {
+            IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Exit selection") }
+        },
+        title = {
+            Text("$selectedCount selected", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+        },
+        actions = {
+            TextButton(onClick = { onToggleSelectAll(!allVisibleSelected) }) {
+                Text(
+                    if (allVisibleSelected) "Deselect All" else "Select All",
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2563EB)
+                )
+            }
+            IconButton(onClick = onShare, enabled = selectedCount > 0) {
+                Icon(Icons.Default.Share, "Share selected", tint = if (selectedCount > 0) Color(0xFF2563EB) else Color(0xFFCBD5E1))
+            }
+            IconButton(onClick = onDelete, enabled = selectedCount > 0) {
+                Icon(Icons.Default.Delete, "Delete selected", tint = if (selectedCount > 0) Color(0xFFDC2626) else Color(0xFFCBD5E1))
+            }
+        }
+    )
 }
 
 // =====================================================================================
@@ -428,8 +619,17 @@ private fun CreationThumb(creation: Creation, onClick: () -> Unit) {
  * Neumorphic creation card: raised rounded container, thumbnail, name, date + size badge and share / delete buttons.
  * Tapping the card opens the actions sheet (same as before); share and delete call the same handlers.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CreationCard(creation: Creation, onClick: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit) {
+private fun CreationCard(
+    creation: Creation,
+    onClick: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+    selected: Boolean = false,
+    batchMode: Boolean = false,
+    onLongClick: (() -> Unit)? = null
+) {
     val shape = RoundedCornerShape(20.dp)
     Column(
         Modifier
@@ -437,7 +637,8 @@ private fun CreationCard(creation: Creation, onClick: () -> Unit, onShare: () ->
             .neuRaised(shape, 4.dp)
             .clip(shape)
             .background(NeuCard)
-            .clickable(onClick = onClick)
+            .then(if (selected) Modifier.border(2.dp, Color(0xFF2563EB), shape) else Modifier)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(10.dp)
     ) {
         Box(
@@ -465,6 +666,27 @@ private fun CreationCard(creation: Creation, onClick: () -> Unit, onShare: () ->
                     .size(20.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.9f)),
                 contentAlignment = Alignment.Center
             ) { Icon(creation.kind.icon(), creation.kind.label, tint = Color(0xFF475569), modifier = Modifier.size(11.dp)) }
+            // re-editable project badge
+            if (creation.projectJson != null) {
+                Box(
+                    Modifier.align(Alignment.BottomEnd).padding(6.dp)
+                        .size(20.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.9f)),
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Default.Layers, "Re-editable project", tint = Color(0xFF2563EB), modifier = Modifier.size(11.dp)) }
+            }
+            // batch selection: blue tint + check circle
+            if (batchMode) {
+                if (selected) Box(Modifier.matchParentSize().background(Color(0x262563EB)))
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(6.dp)
+                        .size(22.dp).clip(CircleShape)
+                        .background(if (selected) Color(0xFF2563EB) else Color.White.copy(alpha = 0.9f))
+                        .border(1.5.dp, if (selected) Color(0xFF2563EB) else Color(0xFFCBD5E1), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selected) Icon(Icons.Default.Check, "Selected", tint = Color.White, modifier = Modifier.size(14.dp))
+                }
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -511,34 +733,188 @@ private fun SheetAction(icon: ImageVector, label: String, tint: Color = Color(0x
     )
 }
 
+/**
+ * Illustrated empty state: raised neumorphic badge (with two small floating accent bubbles),
+ * headline, helper text and a tactile "Create Collage" button that opens the gallery picker ([onCreate]).
+ */
 @Composable
 private fun EmptyCreationsState(onCreate: () -> Unit) {
+    // gentle "breathing" float on the illustration
+    val floatAnim = rememberInfiniteTransition(label = "emptyFloat")
+    val bob by floatAnim.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "bob"
+    )
+
     Column(
         Modifier.fillMaxSize().padding(40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Box(
-            Modifier.size(96.dp).neuRaised(CircleShape, 6.dp).clip(CircleShape).background(NeuCard),
-            contentAlignment = Alignment.Center
-        ) { Icon(Icons.Default.AddPhotoAlternate, null, tint = Color(0xFF9CA3AF), modifier = Modifier.size(36.dp)) }
+        Box(Modifier.size(140.dp), contentAlignment = Alignment.Center) {
+            // outer sunken ring
+            Box(
+                Modifier.size(132.dp).clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(Color(0xFFDDE3EC), NeuBg, Color.White)))
+            )
+            // raised badge
+            Box(
+                Modifier
+                    .size(100.dp)
+                    .graphicsLayer { translationY = -4.dp.toPx() * bob }
+                    .neuRaised(CircleShape, 8.dp)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(Color.White, NeuCard))),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.PhotoLibrary, null, tint = Color(0xFF2563EB), modifier = Modifier.size(42.dp))
+            }
+            // little decorative bubbles
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 6.dp)
+                    .graphicsLayer { translationY = 3.dp.toPx() * bob }
+                    .size(30.dp).neuRaised(CircleShape, 3.dp).clip(CircleShape).background(NeuCard),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Default.GridView, null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(15.dp)) }
+            Box(
+                Modifier.align(Alignment.BottomStart).padding(bottom = 12.dp, start = 4.dp)
+                    .graphicsLayer { translationY = -3.dp.toPx() * bob }
+                    .size(26.dp).neuRaised(CircleShape, 3.dp).clip(CircleShape).background(NeuCard),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Default.Brush, null, tint = Color(0xFFEC4899), modifier = Modifier.size(13.dp)) }
+        }
         Spacer(Modifier.height(28.dp))
-        Text("No creations yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
+        Text("No Collages Yet", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
         Spacer(Modifier.height(8.dp))
         Text(
-            "Start your first collage.",
-            textAlign = TextAlign.Center, color = Color(0xFF94A3B8), fontSize = 13.sp
+            "Choose photos from your gallery and create your first grid or freestyle collage!",
+            textAlign = TextAlign.Center, color = Color(0xFF64748B), fontSize = 13.sp, lineHeight = 19.sp,
+            modifier = Modifier.widthIn(max = 300.dp)
         )
         Spacer(Modifier.height(28.dp))
-        Box(
-            Modifier.height(44.dp).neuRaised(RoundedCornerShape(22.dp), 4.dp).clip(RoundedCornerShape(22.dp))
-                .background(NeuCard).clickable(onClick = onCreate).padding(horizontal = 28.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Create Collage", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2563EB))
+        NeuTactileButton(
+            label = "Create Collage",
+            icon = Icons.Default.AddPhotoAlternate,
+            onClick = onCreate
+        )
+    }
+}
+
+/** Tactile neumorphic button: sinks (lower shadow + slight scale-down) while pressed, haptic tick on tap. */
+@Composable
+private fun NeuTactileButton(label: String, icon: ImageVector, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val elevation by animateDpAsState(if (pressed) 1.dp else 6.dp, tween(110), label = "btnElev")
+    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, tween(110), label = "btnScale")
+    val haptic = LocalHapticFeedback.current
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .height(48.dp)
+            .neuRaised(shape, elevation)
+            .clip(shape)
+            .background(
+                if (pressed) Brush.linearGradient(listOf(Color(0xFFE2E8F0), NeuCard))
+                else Brush.linearGradient(listOf(Color.White, NeuCard))
+            )
+            .clickable(interactionSource = interaction, indication = null) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onClick()
+            }
+            .padding(horizontal = 26.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(icon, null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2563EB))
+    }
+}
+
+// =====================================================================================
+// Shimmer loading placeholders (shown instead of a spinner while creations load)
+// =====================================================================================
+
+/** 2-column grid of neumorphic placeholder cards with a pulsing alpha + diagonal gradient sweep. */
+@Composable
+private fun CreationsShimmerGrid() {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val sweep by transition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1300, easing = LinearEasing)),
+        label = "sweep"
+    )
+    val pulse by transition.animateFloat(
+        initialValue = 0.65f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse"
+    )
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        contentPadding = PaddingValues(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        userScrollEnabled = false,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        items(6) {
+            ShimmerCreationCard(sweep = { sweep }, pulse = { pulse })
         }
     }
 }
+
+/** Mirrors CreationCard's layout (thumb, name, date + size, two round actions) as shimmering blocks. */
+@Composable
+private fun ShimmerCreationCard(sweep: () -> Float, pulse: () -> Float) {
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .neuRaised(shape, 4.dp)
+            .clip(shape)
+            .background(NeuCard)
+            .graphicsLayer { alpha = pulse() }
+            .padding(10.dp)
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).shimmerBlock(RoundedCornerShape(14.dp), sweep))
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth(0.8f).height(11.dp).shimmerBlock(RoundedCornerShape(6.dp), sweep))
+        Spacer(Modifier.height(7.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f).padding(end = 24.dp).height(9.dp).shimmerBlock(RoundedCornerShape(5.dp), sweep))
+            Box(Modifier.width(34.dp).height(14.dp).shimmerBlock(RoundedCornerShape(7.dp), sweep))
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Box(Modifier.size(30.dp).shimmerBlock(CircleShape, sweep))
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.size(30.dp).shimmerBlock(CircleShape, sweep))
+        }
+    }
+}
+
+/**
+ * Sunken placeholder block with a moving highlight. [progress] is read inside the draw phase,
+ * so the animation only redraws – it never recomposes the grid.
+ */
+private fun Modifier.shimmerBlock(shape: Shape, progress: () -> Float): Modifier = this
+    .clip(shape)
+    .drawBehind {
+        val base = Color(0xFFE2E8F0)
+        val highlight = Color(0xFFF8FAFC)
+        drawRect(base)
+        val w = size.width.coerceAtLeast(1f)
+        val x = -w + progress() * (w * 3f)    // sweep from off-left to off-right
+        drawRect(
+            Brush.linearGradient(
+                colors = listOf(Color.Transparent, highlight.copy(alpha = 0.9f), Color.Transparent),
+                start = Offset(x, 0f),
+                end = Offset(x + w * 0.8f, size.height)
+            )
+        )
+    }
 
 /** Flat text pill: filled dark when selected, plain grey text otherwise. */
 @Composable

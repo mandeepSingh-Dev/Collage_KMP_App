@@ -5,6 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,16 +42,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import com.oem.collagekmpapp.BackHandler
 import com.oem.collagekmpapp.BgMaskStroke
+import com.oem.collagekmpapp.MASK_ANALYSIS_SIDE
+import com.oem.collagekmpapp.MaskPixels
+import com.oem.collagekmpapp.magicWandRects
+import com.oem.collagekmpapp.rememberPhotoPixelLoader
 import com.oem.collagekmpapp.USE_LEGACY_EXPORT_DIALOG
 import com.oem.collagekmpapp.UndoRedoActions
 import com.oem.collagekmpapp.UnifiedExportScreen
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.rememberBackgroundRemovalExporter
 import com.oem.collagekmpapp.rememberEditHistory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-private enum class RbTool { ERASER, BRUSH }
+/** ERASER / BRUSH paint the mask; WAND = tap a colour to erase / restore the matching contiguous area. */
+private enum class RbTool { ERASER, BRUSH, WAND }
+
+private const val RB_MAX_ZOOM = 5f
 
 private enum class RbPreviewBg(val label: String) {
     CHECKER("Checker"),
@@ -107,6 +121,19 @@ private fun DrawScope.rbDrawMaskStroke(s: BgMaskStroke) {
     val blend = if (s.restore) BlendMode.Src else BlendMode.Clear
     if (s.fill) {
         drawRect(Color.White, blendMode = blend)
+        return
+    }
+    // Magic Wand / AI Auto-Cutout region (normalized rects), drawn as ONE path – same as the exporter
+    s.rects?.let { r ->
+        val region = Path()
+        var i = 0
+        while (i + 3 < r.size) {
+            region.addRect(
+                Rect(r[i] * size.width, r[i + 1] * size.height, r[i + 2] * size.width, r[i + 3] * size.height)
+            )
+            i += 4
+        }
+        drawPath(region, Color.White, blendMode = blend)
         return
     }
     if (s.points.isEmpty()) return
@@ -169,6 +196,39 @@ fun RemoveBackgroundScreen(
     var isSaving by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
 
+    // ---- canvas zoom / pan (two fingers). Only the VIEW changes; strokes stay normalized to the image.
+    var zoom by remember { mutableStateOf(1f) }             // 1..RB_MAX_ZOOM
+    var pan by remember { mutableStateOf(Offset.Zero) }     // px, applied after scaling around the centre
+
+    // ---- Magic Wand + AI Auto-Cutout
+    var wandTolerance by remember { mutableStateOf(30f) }   // % 10..50
+    var wandRestore by remember { mutableStateOf(false) }   // false = erase the tapped area, true = restore it
+    var analyzing by remember { mutableStateOf(false) }
+    var pixels by remember(photoUri) { mutableStateOf<MaskPixels?>(null) }   // cached analysis copy
+    val pixelLoader = rememberPhotoPixelLoader()
+
+    suspend fun ensurePixels(): MaskPixels? =
+        pixels ?: pixelLoader.load(photoUri, MASK_ANALYSIS_SIDE)?.also { pixels = it }
+
+    /** Adds a region as ONE stroke -> one Undo step, rendered by preview and exporter alike. */
+    fun addRegion(rects: FloatArray, restore: Boolean) {
+        strokes = strokes + BgMaskStroke(emptyList(), 0f, restore = restore, rects = rects)
+        redoStack = emptyList()
+    }
+
+    fun runMagicWand(nx: Float, ny: Float) {
+        if (analyzing) return
+        val restore = wandRestore
+        val tol = wandTolerance / 100f
+        scope.launch {
+            analyzing = true
+            val px = ensurePixels()
+            val rects = px?.let { withContext(Dispatchers.Default) { magicWandRects(it, nx, ny, tol) } }
+            analyzing = false
+            if (rects != null) addRegion(rects, restore) else snackbar.showSnackbar("Couldn't read the photo")
+        }
+    }
+
     fun undo() {
         if (strokes.isNotEmpty()) {
             redoStack = redoStack + strokes.last()
@@ -198,12 +258,26 @@ fun RemoveBackgroundScreen(
         cursor = null
     }
 
+    // ---------------------------------------------------------------- Unsaved-changes guardrail
+    // Top-bar arrow AND system back/gesture: exit directly when nothing is undoable, otherwise confirm first.
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val requestBack: () -> Unit = {
+        if (history.canUndo) showDiscardDialog = true else onBack()
+    }
+    BackHandler(enabled = LocalIsTopScreen.current) { requestBack() }
+    if (showDiscardDialog) {
+        DiscardChangesDialog(
+            onCancel = { showDiscardDialog = false },
+            onDiscard = { showDiscardDialog = false; onBack() }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("Background Eraser", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
                     UndoRedoActions(history)
                     // (legacy per-screen undo()/redo() above are superseded by the shared history buttons)
@@ -246,14 +320,33 @@ fun RemoveBackgroundScreen(
                 // universal Reset: strokes, brush size / offset, preview background and tool back to their defaults
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Eraser tools", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                    RbResetButton(enabled = strokes.isNotEmpty() || brushSize != 40f || brushOffset != 40f || previewBg != RbPreviewBg.CHECKER || tool != RbTool.ERASER) {
+                    RbResetButton(enabled = strokes.isNotEmpty() || brushSize != 40f || brushOffset != 40f || previewBg != RbPreviewBg.CHECKER || tool != RbTool.ERASER || zoom > 1.05f || wandTolerance != 30f || wandRestore) {
                         strokes = emptyList(); redoStack = emptyList(); current = emptyList(); cursor = null
                         brushSize = 40f; brushOffset = 40f; previewBg = RbPreviewBg.CHECKER; tool = RbTool.ERASER
+                        zoom = 1f; pan = Offset.Zero; wandTolerance = 30f; wandRestore = false
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically
+                ) {
                     RbChip("Eraser", tool == RbTool.ERASER) { tool = RbTool.ERASER }
                     RbChip("Brush (restore)", tool == RbTool.BRUSH) { tool = RbTool.BRUSH }
+                    RbChip("🪄 Magic Wand", tool == RbTool.WAND) { tool = RbTool.WAND }
+                }
+                if (tool == RbTool.WAND) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RbChip("Erase area", !wandRestore) { wandRestore = false }
+                        RbChip("Restore area", wandRestore) { wandRestore = true }
+                    }
+                    Column(Modifier.fillMaxWidth()) {
+                        Text("Wand tolerance: ${wandTolerance.toInt()}%", fontSize = 11.sp, color = Color(0xFF334155))
+                        FluidSlider(
+                            value = wandTolerance, onValueChange = { wandTolerance = it },
+                            valueRange = 10f..50f, modifier = Modifier.fillMaxWidth().height(36.dp)
+                        )
+                        Text("Tap a colour on the photo to select its connected area.", fontSize = 10.sp, color = Color(0xFF64748B))
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     RbChip("Erase all", false) { addFill(restore = false) }
@@ -290,83 +383,185 @@ fun RemoveBackgroundScreen(
             val cw = minOf(maxWidth, maxHeight * aspect)
             val ch = cw / aspect
 
-            Box(Modifier.size(cw, ch).clip(RoundedCornerShape(6.dp))) {
-                // 1) transparency indicator
-                Canvas(Modifier.fillMaxSize()) { rbDrawPreviewBackground(previewBg) }
-
-                // 2) photo, multiplied by the alpha mask (all inside one offscreen layer)
+            Box(
+                Modifier
+                    .size(cw, ch)
+                    .clip(RoundedCornerShape(6.dp))
+                    // two-finger pinch-to-zoom (1x..5x) + pan. One finger is left to the brush / wand below.
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            do {
+                                val event = awaitPointerEvent()
+                                if (event.changes.count { it.pressed } >= 2) {
+                                    val zf = event.calculateZoom()
+                                    val pd = event.calculatePan()
+                                    val c = event.calculateCentroid(useCurrent = true)
+                                    val center = Offset(size.width / 2f, size.height / 2f)
+                                    val nz = (zoom * zf).coerceIn(1f, RB_MAX_ZOOM)
+                                    val k = nz / zoom
+                                    // keep the content under the fingers' centroid in place while scaling
+                                    var np = (c - center) * (1f - k) + pan * k + pd
+                                    val mx = (nz - 1f) * size.width / 2f
+                                    val my = (nz - 1f) * size.height / 2f
+                                    np = Offset(np.x.coerceIn(-mx, mx), np.y.coerceIn(-my, my))
+                                    zoom = nz
+                                    pan = if (nz <= 1f) Offset.Zero else np
+                                    event.changes.forEach { it.consume() }
+                                }
+                            } while (event.changes.any { it.pressed })
+                        }
+                    }
+            ) {
+                // everything inside scales / pans together; pointer positions arrive in un-zoomed image space
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .drawWithContent {
-                            drawContent()
-                            drawIntoCanvas { canvas ->
-                                val maskPaint = Paint().apply { blendMode = BlendMode.DstIn }
-                                canvas.saveLayer(Rect(0f, 0f, size.width, size.height), maskPaint)
-                                drawRect(Color.White)
-                                strokes.forEach { rbDrawMaskStroke(it) }
-                                if (current.isNotEmpty()) {
-                                    rbDrawMaskStroke(
-                                        BgMaskStroke(current, brushSize / RB_BRUSH_DIVISOR, restore = tool == RbTool.BRUSH)
-                                    )
-                                }
-                                canvas.restore()
-                            }
-                        }
-                        .pointerInput(tool, brushSize, brushOffset) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                val w = size.width.toFloat()
-                                val h = size.height.toFloat()
-                                val offPx = brushOffset.dp.toPx()
-                                val ratio = brushSize / RB_BRUSH_DIVISOR
-                                fun brushPx(p: Offset) = Offset(p.x, p.y - offPx)
-                                fun norm(p: Offset) = brushPx(p).let { Offset(it.x / w, it.y / h) }
-
-                                current = listOf(norm(down.position))
-                                cursor = brushPx(down.position)
-                                down.consume()
-
-                                var up = false
-                                while (!up) {
-                                    val c = awaitPointerEvent().changes.firstOrNull() ?: break
-                                    if (c.pressed) {
-                                        current = current + norm(c.position)
-                                        cursor = brushPx(c.position)
-                                        c.consume()
-                                    } else up = true
-                                }
-                                if (current.isNotEmpty()) {
-                                    strokes = strokes + BgMaskStroke(current, ratio, restore = tool == RbTool.BRUSH)
-                                    redoStack = emptyList()
-                                }
-                                current = emptyList()
-                                cursor = null
-                            }
+                        .graphicsLayer {
+                            scaleX = zoom; scaleY = zoom
+                            translationX = pan.x; translationY = pan.y
                         }
                 ) {
-                    AsyncImage(
-                        model = photoUri,
-                        contentDescription = null,
-                        contentScale = ContentScale.FillBounds,
-                        onSuccess = { s ->
-                            val sz = s.painter.intrinsicSize
-                            if (sz.width > 0f && sz.height > 0f) aspect = sz.width / sz.height
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    // 1) transparency indicator
+                    Canvas(Modifier.fillMaxSize()) { rbDrawPreviewBackground(previewBg) }
+
+                    // 2) photo, multiplied by the alpha mask (all inside one offscreen layer)
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .drawWithContent {
+                                drawContent()
+                                drawIntoCanvas { canvas ->
+                                    val maskPaint = Paint().apply { blendMode = BlendMode.DstIn }
+                                    canvas.saveLayer(Rect(0f, 0f, size.width, size.height), maskPaint)
+                                    drawRect(Color.White)
+                                    strokes.forEach { rbDrawMaskStroke(it) }
+                                    if (current.isNotEmpty()) {
+                                        rbDrawMaskStroke(
+                                            BgMaskStroke(current, brushSize / RB_BRUSH_DIVISOR, restore = tool == RbTool.BRUSH)
+                                        )
+                                    }
+                                    canvas.restore()
+                                }
+                            }
+                            .pointerInput(tool, brushSize, brushOffset) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val w = size.width.toFloat()
+                                    val h = size.height.toFloat()
+
+                                    // ---- Magic Wand: a clean single-finger tap samples the colour there
+                                    if (tool == RbTool.WAND) {
+                                        val slop = viewConfiguration.touchSlop / zoom
+                                        var valid = true
+                                        var up = false
+                                        while (!up) {
+                                            val ev = awaitPointerEvent()
+                                            if (ev.changes.count { it.pressed } >= 2) valid = false
+                                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                            if ((c.position - down.position).getDistance() > slop) valid = false
+                                            if (!c.pressed) up = true
+                                        }
+                                        if (valid && up) runMagicWand(down.position.x / w, down.position.y / h)
+                                        return@awaitEachGesture
+                                    }
+
+                                    // offset is in screen dp: divide by zoom so it stays the same distance on screen
+                                    val offPx = brushOffset.dp.toPx() / zoom
+                                    val ratio = brushSize / RB_BRUSH_DIVISOR
+                                    fun brushPx(p: Offset) = Offset(p.x, p.y - offPx)
+                                    fun norm(p: Offset) = brushPx(p).let { Offset(it.x / w, it.y / h) }
+
+                                    current = listOf(norm(down.position))
+                                    cursor = brushPx(down.position)
+                                    down.consume()
+
+                                    var up = false
+                                    var aborted = false
+                                    while (!up) {
+                                        val ev = awaitPointerEvent()
+                                        if (ev.changes.count { it.pressed } >= 2) {
+                                            // second finger -> this is a pinch, not a stroke: discard and wait for release
+                                            aborted = true
+                                            current = emptyList()
+                                            cursor = null
+                                            do {
+                                                val e2 = awaitPointerEvent()
+                                            } while (e2.changes.any { it.pressed })
+                                            break
+                                        }
+                                        val c = ev.changes.firstOrNull() ?: break
+                                        if (c.pressed) {
+                                            current = current + norm(c.position)
+                                            cursor = brushPx(c.position)
+                                            c.consume()
+                                        } else up = true
+                                    }
+                                    if (!aborted && current.isNotEmpty()) {
+                                        strokes = strokes + BgMaskStroke(current, ratio, restore = tool == RbTool.BRUSH)
+                                        redoStack = emptyList()
+                                    }
+                                    current = emptyList()
+                                    cursor = null
+                                }
+                            }
+                    ) {
+                        AsyncImage(
+                            model = photoUri,
+                            contentDescription = null,
+                            contentScale = ContentScale.FillBounds,
+                            onSuccess = { s ->
+                                val sz = s.painter.intrinsicSize
+                                if (sz.width > 0f && sz.height > 0f) aspect = sz.width / sz.height
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    // 3) brush cursor ring (drawn above the finger when an offset is set).
+                    // The radius is in image space, so it scales with the zoom like the stroke it previews;
+                    // the outline width is divided by zoom so it stays a crisp hairline on screen.
+                    Canvas(Modifier.fillMaxSize()) {
+                        cursor?.let { c ->
+                            val r = brushSize / RB_BRUSH_DIVISOR * size.width / 2f
+                            drawCircle(Color.Black.copy(alpha = 0.6f), r + 1.5f / zoom, c, style = Stroke(3f / zoom))
+                            drawCircle(
+                                if (tool == RbTool.BRUSH) Color(0xFF22C55E) else Color.White,
+                                r, c, style = Stroke(2f / zoom)
+                            )
+                        }
+                    }
                 }
 
-                // 3) brush cursor ring (drawn above the finger when an offset is set)
-                Canvas(Modifier.fillMaxSize()) {
-                    cursor?.let { c ->
-                        val r = brushSize / RB_BRUSH_DIVISOR * size.width / 2f
-                        drawCircle(Color.Black.copy(alpha = 0.6f), r + 1.5f, c, style = Stroke(3f))
-                        drawCircle(
-                            if (tool == RbTool.BRUSH) Color(0xFF22C55E) else Color.White,
-                            r, c, style = Stroke(2f)
-                        )
+                // analysing overlay (Auto-Cutout / Magic Wand)
+                if (analyzing) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
+                    }
+                }
+            }
+
+            // floating zoom chip + [ 100% ] reset (only while zoomed in)
+            if (zoom > 1.05f) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xE60F172A))
+                        .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("${(zoom * 100).toInt()}%", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White)
+                            .clickable { zoom = 1f; pan = Offset.Zero }
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("[ 100% ]", color = Color(0xFF0F172A), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

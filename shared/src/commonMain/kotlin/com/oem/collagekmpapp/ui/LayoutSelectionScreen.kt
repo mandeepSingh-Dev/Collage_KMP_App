@@ -80,7 +80,8 @@ fun LayoutSelectionScreen(
                         onClick = {
                             val tpl = selectedTemplate
                             if (templateMode && tpl != null) {
-                                onNavigate(Screen.Editor(tpl.layoutIdFor(selectedPhotos.size), selectedPhotos, tpl.id))
+                                // smart order: first picked photo -> the template's featured (largest) slot (matches the live preview)
+                                onNavigate(Screen.Editor(tpl.layoutIdFor(selectedPhotos.size), tpl.orderPhotosForSlots(selectedPhotos), tpl.id))
                             } else {
                                 onNavigate(Screen.Editor(selectedLayout.id, selectedPhotos))
                             }

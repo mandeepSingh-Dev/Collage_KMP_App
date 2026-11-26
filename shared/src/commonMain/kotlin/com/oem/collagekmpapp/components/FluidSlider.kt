@@ -202,6 +202,17 @@ fun FluidSlider(
         if (isDragging) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
+    // Stronger "bump" the moment the knob reaches the minimum (0 %) or maximum (100 %) of the range.
+    // Keyed on the edge state, so it fires once on arrival, not on every frame spent at the edge.
+    val edgeState = when {
+        fraction <= 0f -> -1
+        fraction >= 1f -> 1
+        else -> 0
+    }
+    LaunchedEffect(edgeState) {
+        if (isDragging && edgeState != 0) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -218,6 +229,8 @@ fun FluidSlider(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     isDragging = true
+                    // tactile tick as soon as the finger grabs the slider
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     updateFromX(down.position.x)
                     // Horizontal drags are ours; a vertical swipe hands control back to a scrolling parent.
                     val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() }

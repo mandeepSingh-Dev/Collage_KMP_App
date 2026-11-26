@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
@@ -33,7 +34,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -70,6 +85,8 @@ import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.model.*
 import com.oem.collagekmpapp.rememberFreestyleExporter
 import com.oem.collagekmpapp.rememberGalleryPicker
+import com.oem.collagekmpapp.ui.DiscardChangesDialog
+import com.oem.collagekmpapp.ui.LocalIsTopScreen
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
@@ -87,8 +104,13 @@ private enum class FsTool(val label: String, val icon: ImageVector) {
     STICKERS("Stickers", Icons.Default.EmojiEmotions),
     FILTER("Filter", Icons.Default.Star),
     ADJUST("Adjust", Icons.Default.Tune),
-    DRAW("Draw", Icons.Default.Edit)
+    DRAW("Draw", Icons.Default.Edit),
+    /** Opens the Layer Stack Manager sheet (it doesn't switch the tool panel). */
+    LAYERS("Layers", Icons.Default.Layers)
 }
+
+/** Magnetic snap distance to the canvas centre lines (normalized canvas units). */
+private const val FS_SNAP = 0.015f
 
 private val FsPalette: List<Color> = listOf(
     0xFFFFFFFFL, 0xFF0F172AL, 0xFFEF4444L, 0xFFF97316L, 0xFFFACC15L, 0xFF22C55EL, 0xFF06B6D4L,
@@ -178,6 +200,50 @@ private fun fsHandlePos(it: FreestyleItem, w: Float, h: Float, sy: Float, margin
 }
 
 // =================================================================== drawing helpers
+
+/** Jagged torn-paper outline as a Shape (used for shadow + clip), same geometry as the exporter. */
+private class FsTornShape(private val seed: Int) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val pts = tornPaperOutline(size.width, size.height, seed)
+        val path = Path().apply {
+            moveTo(pts[0], pts[1])
+            var i = 2
+            while (i < pts.size) { lineTo(pts[i], pts[i + 1]); i += 2 }
+            close()
+        }
+        return Outline.Generic(path)
+    }
+}
+
+/** Film strip frame drawn over the photo: even-odd path = real sprocket-hole cut-outs. */
+private fun DrawScope.fsDrawFilmFrame(cornerPx: Float) {
+    val iw = size.width
+    val ih = size.height
+    val ins = PhotoFrame.FILM.insets()
+    val path = Path().apply {
+        fillType = PathFillType.EvenOdd
+        addRoundRect(RoundRect(0f, 0f, iw, ih, CornerRadius(cornerPx)))
+        addRect(Rect(ins.side * iw, ins.top * iw, iw - ins.side * iw, ih - ins.bottom * iw))
+        filmSprocketHoles(iw, ih).forEach { hole ->
+            addRoundRect(RoundRect(hole[0], hole[1], hole[2], hole[3], CornerRadius(hole[4])))
+        }
+    }
+    drawPath(path, Color(FreestyleItem.FILM_COLOR.toInt()))
+}
+
+/** Two translucent tape strips over the top corners (they may overhang the frame). */
+private fun DrawScope.fsDrawTape() {
+    val tape = Color(FreestyleItem.TAPE_COLOR.toInt())
+    val edge = Color(FreestyleItem.TAPE_EDGE_COLOR.toInt())
+    tapeStrips(size.width, size.height).forEach { t ->
+        rotate(t.angle, pivot = Offset(t.cx, t.cy)) {
+            val tl = Offset(t.cx - t.length / 2f, t.cy - t.thickness / 2f)
+            val sz = Size(t.length, t.thickness)
+            drawRect(tape, tl, sz)
+            drawRect(edge, tl, sz, style = Stroke(size.width * 0.004f))
+        }
+    }
+}
 
 private fun DrawScope.fsDrawTexture(t: BackgroundTexture) {
     if (t == BackgroundTexture.NONE) return
@@ -326,27 +392,43 @@ private fun FsItemView(
             .offset { IntOffset((item.x * canvasW - wPx / 2f).roundToInt(), (item.y * canvasH - hPx / 2f).roundToInt()) }
             .size(with(density) { wPx.toDp() }, with(density) { hPx.toDp() })
             .graphicsLayer { rotationZ = item.rotation; scaleX = item.scale; scaleY = item.scale }
-            .then(if (isPhoto && item.shadow) Modifier.shadow(with(density) { (0.02f * wPx).toDp() }, shape, clip = false) else Modifier)
-            .then(if (isPhoto) Modifier.clip(shape) else Modifier)
-            .then(if (isPhoto && item.frame == PhotoFrame.POLAROID) Modifier.background(Color.White) else Modifier)
     ) {
         when (item.kind) {
             FreestyleItemKind.PHOTO -> {
-                val polaroid = item.frame == PhotoFrame.POLAROID
-                val side = if (polaroid) with(density) { (FreestyleItem.POLAROID_SIDE * wPx).toDp() } else 0.dp
-                val bottom = if (polaroid) with(density) { (FreestyleItem.POLAROID_BOTTOM * wPx).toDp() } else 0.dp
-                Box(Modifier.fillMaxSize().padding(start = side, top = side, end = side, bottom = bottom)) {
-                    // Same composable as the grid editor: colour matrix + blur/soften/clarity/sharpen/glow/grain/vignette,
-                    // so every Adjust/Filter result matches PhotoLook in FreestyleRenderer (it used to show colour + a rough vignette only).
-                    FilteredPhoto(
-                        uri = item.content,
-                        matrix = matrix,
-                        effects = effects,
-                        modifier = Modifier.fillMaxSize(),
-                        canvasWidthPx = canvasW,
-                        onImageAspect = { a -> onAspect(item.id, a) }
-                    )
+                // Card outline: torn paper uses its jagged shape for shadow + clip, every other frame the rounded rect.
+                val outline: Shape = if (item.frame == PhotoFrame.TORN) remember(item.id) { FsTornShape(item.id.hashCode()) } else shape
+                val whiteCard = item.frame == PhotoFrame.POLAROID || item.frame == PhotoFrame.TAPE || item.frame == PhotoFrame.TORN
+                // Same modifier order as before (shadow -> clip -> white card), one level down so tape can overhang the clip.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .then(if (item.shadow) Modifier.shadow(with(density) { (0.02f * wPx).toDp() }, outline, clip = false) else Modifier)
+                        .clip(outline)
+                        .then(if (whiteCard) Modifier.background(Color.White) else Modifier)
+                ) {
+                    // photo window from the shared frame insets (POLAROID: side / side / bottom exactly as before; NONE/ROUNDED: 0)
+                    val ins = item.frame.insets()
+                    val side = with(density) { (ins.side * wPx).toDp() }
+                    val top = with(density) { (ins.top * wPx).toDp() }
+                    val bottom = with(density) { (ins.bottom * wPx).toDp() }
+                    Box(Modifier.fillMaxSize().padding(start = side, top = top, end = side, bottom = bottom)) {
+                        // Same composable as the grid editor: colour matrix + blur/soften/clarity/sharpen/glow/grain/vignette,
+                        // so every Adjust/Filter result matches PhotoLook in FreestyleRenderer (it used to show colour + a rough vignette only).
+                        FilteredPhoto(
+                            uri = item.content,
+                            matrix = matrix,
+                            effects = effects,
+                            modifier = Modifier.fillMaxSize(),
+                            canvasWidthPx = canvasW,
+                            onImageAspect = { a -> onAspect(item.id, a) }
+                        )
+                    }
+                    if (item.frame == PhotoFrame.FILM) {
+                        val cornerPx = item.cornerUnits * canvasW
+                        Canvas(Modifier.fillMaxSize()) { fsDrawFilmFrame(cornerPx) }
+                    }
                 }
+                if (item.frame == PhotoFrame.TAPE) Canvas(Modifier.fillMaxSize()) { fsDrawTape() }
             }
             FreestyleItemKind.EMOJI -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(item.content, fontSize = with(density) { (wPx * 0.8f).toSp() })
@@ -368,6 +450,153 @@ private fun FsItemView(
             }
         }
         if (selected) Box(Modifier.fillMaxSize().border(1.5.dp, Color(0xFF2563EB)))
+        // locked items show a small padlock while selected (they're only selectable from the Layers sheet)
+        if (selected && item.isLocked) {
+            Box(
+                Modifier.align(Alignment.TopStart).padding(4.dp).size(22.dp).clip(CircleShape).background(Color(0xCC0F172A)),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Default.Lock, "Locked", tint = Color.White, modifier = Modifier.size(13.dp)) }
+        }
+    }
+}
+
+// =================================================================== layer stack manager
+
+@Composable
+private fun FsLayerButton(
+    icon: ImageVector,
+    desc: String,
+    tint: Color = Color(0xFF475569),
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier.size(32.dp).clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Icon(icon, desc, tint = if (enabled) tint else Color(0xFFCBD5E1), modifier = Modifier.size(19.dp)) }
+}
+
+/**
+ * Layer list, top row = front-most item. Drag the ≡ handle to reorder (rows shift live while dragging);
+ * per row: forward / backward one step, bring to front, send to back, lock / unlock, delete (disabled while locked).
+ * Indices passed to [onReorder] are z-indices in the items list (0 = back).
+ */
+@Composable
+private fun FsLayerStack(
+    items: List<FreestyleItem>,
+    isSelected: (String) -> Boolean,
+    onSelect: (FreestyleItem) -> Unit,
+    onReorder: (from: Int, to: Int) -> Unit,
+    onForward: (String) -> Unit,
+    onBackward: (String) -> Unit,
+    onToFront: (String) -> Unit,
+    onToBack: (String) -> Unit,
+    onToggleLock: (String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    val rowH = 60.dp
+    val rowPx = with(LocalDensity.current) { rowH.toPx() }
+    val latestItems by rememberUpdatedState(items)
+    val latestReorder by rememberUpdatedState(onReorder)
+    var dragFrom by remember { mutableStateOf<Int?>(null) }      // display index of the row being dragged
+    var dragDy by remember { mutableStateOf(0f) }
+    val display = items.asReversed()
+    val n = display.size
+    val from = dragFrom
+    val target = from?.let { (it + (dragDy / rowPx).roundToInt()).coerceIn(0, (n - 1).coerceAtLeast(0)) }
+
+    Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+        display.forEachIndexed { d, item ->
+            key(item.id) {
+                val shift = when {
+                    from == null || target == null -> 0f
+                    d == from -> dragDy
+                    from < target && d in (from + 1)..target -> -rowPx
+                    target < from && d in target until from -> rowPx
+                    else -> 0f
+                }
+                val dragging = d == from
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(rowH)
+                        .zIndex(if (dragging) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = shift
+                            if (dragging) { shadowElevation = 8.dp.toPx(); shape = RoundedCornerShape(10.dp) }
+                        }
+                        .background(
+                            when {
+                                isSelected(item.id) -> Color(0xFFEFF6FF)
+                                dragging -> Color.White
+                                else -> Color.Transparent
+                            },
+                            RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onSelect(item) }
+                        .padding(horizontal = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.DragHandle, "Drag to reorder", tint = Color(0xFF94A3B8),
+                        modifier = Modifier
+                            .size(34.dp)
+                            .pointerInput(item.id) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        dragFrom = latestItems.asReversed().indexOfFirst { it.id == item.id }.takeIf { it >= 0 }
+                                        dragDy = 0f
+                                    },
+                                    onDrag = { change, amount -> change.consume(); dragDy += amount.y },
+                                    onDragEnd = {
+                                        val f = dragFrom
+                                        val cnt = latestItems.size
+                                        if (f != null && cnt > 1) {
+                                            val t = (f + (dragDy / rowPx).roundToInt()).coerceIn(0, cnt - 1)
+                                            // display index -> z-index (display is reversed)
+                                            if (t != f) latestReorder(cnt - 1 - f, cnt - 1 - t)
+                                        }
+                                        dragFrom = null
+                                        dragDy = 0f
+                                    },
+                                    onDragCancel = { dragFrom = null; dragDy = 0f }
+                                )
+                            }
+                            .padding(5.dp)
+                    )
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFFF1F5F9)), contentAlignment = Alignment.Center) {
+                        when (item.kind) {
+                            FreestyleItemKind.PHOTO -> AsyncImage(item.content, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            FreestyleItemKind.EMOJI -> Text(item.content, fontSize = 20.sp)
+                            FreestyleItemKind.TEXT -> Text("Tt", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when (item.kind) {
+                                FreestyleItemKind.PHOTO -> "Photo"
+                                FreestyleItemKind.EMOJI -> "Sticker"
+                                FreestyleItemKind.TEXT -> item.content.take(16)
+                            },
+                            fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                        if (item.isLocked) Text("Locked", fontSize = 10.sp, color = Color(0xFFB45309))
+                    }
+                    val locked = item.isLocked
+                    FsLayerButton(Icons.Default.KeyboardArrowUp, "Bring forward") { onForward(item.id) }
+                    FsLayerButton(Icons.Default.KeyboardArrowDown, "Send backward") { onBackward(item.id) }
+                    FsLayerButton(Icons.Default.VerticalAlignTop, "Bring to front") { onToFront(item.id) }
+                    FsLayerButton(Icons.Default.VerticalAlignBottom, "Send to back") { onToBack(item.id) }
+                    FsLayerButton(
+                        if (locked) Icons.Default.Lock else Icons.Default.LockOpen,
+                        if (locked) "Unlock" else "Lock",
+                        tint = if (locked) Color(0xFFB45309) else Color(0xFF475569)
+                    ) { onToggleLock(item.id) }
+                    FsLayerButton(Icons.Default.Delete, "Delete", tint = Color(0xFFEF4444), enabled = !locked) { onDelete(item.id) }
+                }
+            }
+        }
     }
 }
 
@@ -401,7 +630,8 @@ fun FreestyleEditorScreen(
 
     var tool by remember { mutableStateOf(FsTool.FRAME) }
     var freeItems by remember { mutableStateOf(buildInitialFreestyleItems(selectedPhotos)) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    // starts on the first photo, so the Frame panel (the opening tool) applies to it straight away
+    var selectedId by remember { mutableStateOf(freeItems.firstOrNull { it.kind == FreestyleItemKind.PHOTO }?.id) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
     var aspect by remember { mutableStateOf(AspectRatio.SQUARE) }
@@ -435,8 +665,23 @@ fun FreestyleEditorScreen(
     var textDialogOpen by remember { mutableStateOf(false) }
     var editingTextId by remember { mutableStateOf<String?>(null) }
 
+    // ---- alignment snap guides (shown while an item is magnetized to a centre line)
+    var snapGuideX by remember { mutableStateOf(false) }   // vertical line at x = 0.5
+    var snapGuideY by remember { mutableStateOf(false) }   // horizontal line at y = 0.5
+    val haptic = LocalHapticFeedback.current
+
     fun updateItem(id: String, f: (FreestyleItem) -> FreestyleItem) {
         freeItems = freeItems.map { if (it.id == id) f(it) else it }
+    }
+
+    /** Moves item [id] to z-index [to] (0 = back, lastIndex = front). */
+    fun moveItemTo(id: String, to: Int) {
+        val idx = freeItems.indexOfFirst { it.id == id }
+        if (idx < 0) return
+        val m = freeItems.toMutableList()
+        val it = m.removeAt(idx)
+        m.add(to.coerceIn(0, m.size), it)
+        freeItems = m
     }
 
     fun moveItem(id: String, delta: Int) {
@@ -465,6 +710,18 @@ fun FreestyleEditorScreen(
     }
 
     val selected = freeItems.firstOrNull { it.id == selectedId }
+
+    // Opening the Frame tool: nothing selected (or a sticker / text selected) -> select the first photo,
+    // so the frame chips apply to it immediately. Keyed on the tool only, so tapping empty canvas while the
+    // Frame panel is open still deselects normally.
+    LaunchedEffect(tool) {
+        if (tool == FsTool.FRAME) {
+            val current = freeItems.firstOrNull { it.id == selectedId }
+            if (current == null || current.kind != FreestyleItemKind.PHOTO) {
+                freeItems.firstOrNull { it.kind == FreestyleItemKind.PHOTO }?.let { selectedId = it.id }
+            }
+        }
+    }
 
     fun buildProject() = FreestyleProject(
         aspectRatioWidth = aspect.widthRatio,
@@ -520,10 +777,11 @@ fun FreestyleEditorScreen(
         FsTool.TEXT -> selText != null && (selText.fontName != defText.fontName || selText.colorLong != defText.colorLong ||
                 selText.fontSizeRatio != defText.fontSizeRatio || selText.textPill != defText.textPill ||
                 selText.textShadow != defText.textShadow)
-        FsTool.STICKERS -> freeItems.any { it.kind == FreestyleItemKind.EMOJI }
+        FsTool.STICKERS -> freeItems.any { it.kind == FreestyleItemKind.EMOJI && !it.isLocked }
         FsTool.FILTER -> filterPreset != "Original" || filterIntensity != 0f
         FsTool.ADJUST -> adjustValues.any { it.value != 0f }
         FsTool.DRAW -> strokes.isNotEmpty() || eraser || brushSize != 10f || brushOpacity != 100f || brushColor != Color(0xFFF43F8E)
+        FsTool.LAYERS -> false
     }
     val resetTool: () -> Unit = {
         when (tool) {
@@ -544,8 +802,9 @@ fun FreestyleEditorScreen(
                 }
             }
             FsTool.STICKERS -> {
-                freeItems = freeItems.filter { it.kind != FreestyleItemKind.EMOJI }
-                if (selected?.kind == FreestyleItemKind.EMOJI) selectedId = null
+                // locked stickers can't be deleted, so Reset keeps them
+                freeItems = freeItems.filter { it.kind != FreestyleItemKind.EMOJI || it.isLocked }
+                if (selected?.kind == FreestyleItemKind.EMOJI && selected?.isLocked == false) selectedId = null
             }
             FsTool.FILTER -> { filterPreset = "Original"; filterIntensity = 0f }
             FsTool.ADJUST -> adjustValues = emptyMap()
@@ -553,7 +812,23 @@ fun FreestyleEditorScreen(
                 strokes = emptyList(); currentStroke = emptyList(); eraser = false
                 brushColor = Color(0xFFF43F8E); brushSize = 10f; brushOpacity = 100f
             }
+            FsTool.LAYERS -> Unit
         }
+    }
+
+    // ---------------------------------------------------------------- Unsaved-changes guardrail
+    // Top-bar arrow AND system back/gesture: exit directly when nothing is undoable, otherwise confirm first.
+    // (The export / layers / text dialogs handle back themselves while they are open.)
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val requestBack: () -> Unit = {
+        if (history.canUndo) showDiscardDialog = true else onBack()
+    }
+    BackHandler(enabled = LocalIsTopScreen.current) { requestBack() }
+    if (showDiscardDialog) {
+        DiscardChangesDialog(
+            onCancel = { showDiscardDialog = false },
+            onDiscard = { showDiscardDialog = false; onBack() }
+        )
     }
 
     Scaffold(
@@ -561,7 +836,7 @@ fun FreestyleEditorScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Freestyle Studio", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
                     UndoRedoActions(history)
                     IconButton(onClick = { showLayers = true }) { Icon(Icons.Default.Layers, "Layers") }
@@ -652,7 +927,8 @@ fun FreestyleEditorScreen(
                                 val sel = selected
                                 if (sel != null && sel.kind == FreestyleItemKind.PHOTO) {
                                     FsLabel("Photo frame")
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    // scrollable: 6 frame styles no longer fit on one screen width
+                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         PhotoFrame.entries.forEach { f ->
                                             FsChip(f.label, sel.frame == f) { updateItem(sel.id) { it.copy(frame = f) } }
                                         }
@@ -885,6 +1161,8 @@ fun FreestyleEditorScreen(
                                 FsSliderRow("Opacity: ${brushOpacity.toInt()}%", brushOpacity, 10f..100f) { brushOpacity = it }
                                 FsColorRow(brushColor) { brushColor = it; eraser = false }
                             }
+                            // ------------------------------------------------ LAYERS (opens the sheet; panel never switches here)
+                            FsTool.LAYERS -> Unit
                         }
                     }
                 }
@@ -894,12 +1172,13 @@ fun FreestyleEditorScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FsTool.entries.forEach { t ->
-                        val sel = tool == t
+                        // "Layers" opens the Layer Stack Manager sheet and keeps the current tool panel
+                        val sel = if (t == FsTool.LAYERS) showLayers else tool == t
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp))
                                 .background(if (sel) Color(0xFFEFF6FF) else Color.Transparent)
-                                .clickable { tool = t }
+                                .clickable { if (t == FsTool.LAYERS) showLayers = true else tool = t }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Icon(t.icon, null, tint = if (sel) Color(0xFF2563EB) else Color(0xFF64748B), modifier = Modifier.size(18.dp))
@@ -962,10 +1241,11 @@ fun FreestyleEditorScreen(
                                 return@awaitEachGesture
                             }
 
-                            // ------------------------- handles of the selected item
                             val margin = 16.dp.toPx()
                             val hitR = 26.dp.toPx()
-                            val sel = freeItems.firstOrNull { it.id == selectedId }
+
+                            // ------------------------- handles of the selected item (never for locked items)
+                            val sel = freeItems.firstOrNull { it.id == selectedId }?.takeIf { !it.isLocked }
                             if (sel != null) {
                                 val del = fsHandlePos(sel, w, h, -1f, margin)
                                 val scl = fsHandlePos(sel, w, h, 1f, margin)
@@ -995,8 +1275,9 @@ fun FreestyleEditorScreen(
                                 }
                             }
 
-                            // ------------------------- pick an item (top-most first)
-                            val hit = freeItems.lastOrNull { fsHitTest(it, down.position, w, h) }
+                            // ------------------------- pick an item (top-most first; locked items are skipped so
+                            // touches fall through to what's underneath – manage locked layers from the Layers sheet)
+                            val hit = freeItems.lastOrNull { !it.isLocked && fsHitTest(it, down.position, w, h) }
                             if (hit == null) {
                                 selectedId = null
                                 return@awaitEachGesture
@@ -1007,24 +1288,50 @@ fun FreestyleEditorScreen(
                             freeItems = cur.filter { it.id != hit.id } + cur.first { it.id == hit.id }
                             down.consume()
 
-                            // ------------------------- 1-finger drag, 2-finger pinch + rotate
+                            // un-snapped ("raw") centre of the touched item, so it can leave the magnet again
+                            var rawX = hit.x
+                            var rawY = hit.y
+
+                            // ------------------------- 1-finger drag, 2-finger pinch + rotate (selected item only)
                             do {
                                 val ev = awaitPointerEvent()
                                 val zoom = ev.calculateZoom()
                                 val rot = ev.calculateRotation()
                                 val pan = ev.calculatePan()
                                 if (zoom != 1f || rot != 0f || pan != Offset.Zero) {
-                                    updateItem(hit.id) {
-                                        it.copy(
-                                            x = it.x + pan.x / w,
-                                            y = it.y + pan.y / h,
-                                            scale = (it.scale * zoom).coerceIn(0.15f, 8f),
-                                            rotation = it.rotation + rot
-                                        )
+                                    if (zoom == 1f && rot == 0f) {
+                                        // pure drag -> magnetic centre-line snapping on the item's centre
+                                        rawX += pan.x / w
+                                        rawY += pan.y / h
+                                        val snapX = abs(rawX - 0.5f) < FS_SNAP
+                                        val snapY = abs(rawY - 0.5f) < FS_SNAP
+                                        if ((snapX && !snapGuideX) || (snapY && !snapGuideY)) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
+                                        snapGuideX = snapX
+                                        snapGuideY = snapY
+                                        val tx = if (snapX) 0.5f else rawX
+                                        val ty = if (snapY) 0.5f else rawY
+                                        updateItem(hit.id) { it.copy(x = tx, y = ty) }
+                                    } else {
+                                        // pinch / twist (the original single-item maths)
+                                        updateItem(hit.id) {
+                                            it.copy(
+                                                x = it.x + pan.x / w,
+                                                y = it.y + pan.y / h,
+                                                scale = (it.scale * zoom).coerceIn(0.15f, 8f),
+                                                rotation = it.rotation + rot
+                                            )
+                                        }
+                                        freeItems.firstOrNull { it.id == hit.id }?.let { rawX = it.x; rawY = it.y }
+                                        snapGuideX = false
+                                        snapGuideY = false
                                     }
                                     ev.changes.forEach { if (it.positionChanged()) it.consume() }
                                 }
                             } while (ev.changes.any { it.pressed })
+                            snapGuideX = false
+                            snapGuideY = false
                         }
                     }
             ) {
@@ -1068,11 +1375,22 @@ fun FreestyleEditorScreen(
                             fsDrawStroke(currentStroke, brushColor.copy(alpha = brushOpacity / 100f), brushSize / 1000f)
                         }
                     }
+
+                    // alignment guides: dashed centre lines while an item is snapped to them
+                    if (snapGuideX || snapGuideY) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val guide = Color(0xFFEC4899)
+                            val dash = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 6.dp.toPx()))
+                            val sw = 1.5.dp.toPx()
+                            if (snapGuideX) drawLine(guide, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), sw, pathEffect = dash)
+                            if (snapGuideY) drawLine(guide, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), sw, pathEffect = dash)
+                        }
+                    }
                 }
 
-                // ---------------- transform handles (outside the clip so they stay visible)
+                // ---------------- transform handles (outside the clip so they stay visible; none for locked items)
                 val s = selected
-                if (s != null && W > 0f && tool != FsTool.DRAW) {
+                if (s != null && !s.isLocked && W > 0f && tool != FsTool.DRAW) {
                     val m = with(density) { 16.dp.toPx() }
                     FsHandle(fsHandlePos(s, W, H, -1f, m), Color(0xFFEF4444), Icons.Default.Close, "Delete")
                     FsHandle(fsHandlePos(s, W, H, 1f, m), Color(0xFF2563EB), Icons.Default.OpenInFull, "Scale and rotate")
@@ -1086,42 +1404,33 @@ fun FreestyleEditorScreen(
         ModalBottomSheet(onDismissRequest = { showLayers = false }) {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
                 Text("Layers (top = front)", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Drag ≡ to reorder · locked layers can't be moved or deleted", fontSize = 11.sp, color = Color(0xFF64748B))
                 Spacer(Modifier.height(8.dp))
                 if (freeItems.isEmpty()) Text("Nothing on the canvas yet.", color = Color(0xFF64748B))
-                LazyColumn(Modifier.heightIn(max = 380.dp)) {
-                    items(freeItems.asReversed(), key = { it.id }) { it2 ->
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .background(if (it2.id == selectedId) Color(0xFFEFF6FF) else Color.Transparent, RoundedCornerShape(8.dp))
-                                .clickable { selectedId = it2.id }
-                                .padding(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFFF1F5F9)), contentAlignment = Alignment.Center) {
-                                when (it2.kind) {
-                                    FreestyleItemKind.PHOTO -> AsyncImage(it2.content, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                    FreestyleItemKind.EMOJI -> Text(it2.content, fontSize = 20.sp)
-                                    FreestyleItemKind.TEXT -> Text("Tt", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                when (it2.kind) {
-                                    FreestyleItemKind.PHOTO -> "Photo"
-                                    FreestyleItemKind.EMOJI -> "Sticker"
-                                    FreestyleItemKind.TEXT -> it2.content.take(16)
-                                },
-                                modifier = Modifier.weight(1f), fontSize = 14.sp
-                            )
-                            IconButton(onClick = { moveItem(it2.id, 1) }) { Icon(Icons.Default.KeyboardArrowUp, "Bring forward") }
-                            IconButton(onClick = { moveItem(it2.id, -1) }) { Icon(Icons.Default.KeyboardArrowDown, "Send backward") }
-                            IconButton(onClick = {
-                                freeItems = freeItems.filter { f -> f.id != it2.id }
-                                if (selectedId == it2.id) selectedId = null
-                            }) { Icon(Icons.Default.Delete, "Delete", tint = Color(0xFFEF4444)) }
+                FsLayerStack(
+                    items = freeItems,
+                    isSelected = { id -> id == selectedId },
+                    onSelect = { item -> selectedId = item.id },
+                    onReorder = { from, to ->
+                        val m = freeItems.toMutableList()
+                        m.add(to, m.removeAt(from))
+                        freeItems = m
+                    },
+                    onForward = { id -> moveItem(id, 1) },
+                    onBackward = { id -> moveItem(id, -1) },
+                    onToFront = { id -> moveItemTo(id, freeItems.lastIndex) },
+                    onToBack = { id -> moveItemTo(id, 0) },
+                    onToggleLock = { id ->
+                        val nowLocked = freeItems.firstOrNull { it.id == id }?.isLocked != true
+                        updateItem(id) { it.copy(isLocked = nowLocked) }
+                    },
+                    onDelete = { id ->
+                        if (freeItems.firstOrNull { it.id == id }?.isLocked != true) {
+                            freeItems = freeItems.filter { f -> f.id != id }
+                            if (selectedId == id) selectedId = null
                         }
                     }
-                }
+                )
             }
         }
     }

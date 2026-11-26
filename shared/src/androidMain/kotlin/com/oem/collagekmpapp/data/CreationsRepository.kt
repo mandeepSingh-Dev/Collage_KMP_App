@@ -11,80 +11,102 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-actual class CreationsRepository(private val context: Context, folder: String) {
-
-    private val folder = folder.trim('/')
-
-    private val collection: Uri =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        else
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-
-    @Suppress("DEPRECATION")
+actual class CreationsRepository(
+    private val context: Context,
+    private val folder: String
+) {
     actual suspend fun load(): List<Creation> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<Creation>()
+        val folderName = folder.trim('/').substringAfterLast('/')
+
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.DATE_ADDED,
+            MediaStore.Images.Media.DATE_MODIFIED,
             MediaStore.Images.Media.SIZE,
             MediaStore.Images.Media.WIDTH,
-            MediaStore.Images.Media.HEIGHT
+            MediaStore.Images.Media.HEIGHT,
+            MediaStore.Images.Media.DATA
         )
+
+        val resolver = context.contentResolver
+        val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+
         val selection: String
-        val args: Array<String>
+        val selectionArgs: Array<String>
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-            args = arrayOf("$folder/%")
+            selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+            selectionArgs = arrayOf("%$folderName%")
         } else {
             selection = "${MediaStore.Images.Media.DATA} LIKE ?"
-            args = arrayOf("%/$folder/%")
+            selectionArgs = arrayOf("%$folderName%")
         }
 
-        val result = mutableListOf<Creation>()
-        context.contentResolver.query(
-            collection, projection, selection, args,
-            "${MediaStore.Images.Media.DATE_ADDED} DESC"
-        )?.use { c ->
-            val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-            val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-            val sizeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
-            val wCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
-            val hCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
-            while (c.moveToNext()) {
-                val id = c.getLong(idCol)
-                val name = c.getString(nameCol) ?: "creation_$id"
-                result += Creation(
-                    id = id.toString(),
-                    uri = ContentUris.withAppendedId(collection, id).toString(),
-                    name = name,
-                    dateMillis = c.getLong(dateCol) * 1000L,
-                    sizeBytes = c.getLong(sizeCol),
-                    width = c.getInt(wCol),
-                    height = c.getInt(hCol),
-                    kind = CreationKind.fromFileName(name)
+        resolver.query(
+            uri,
+            projection,
+            selection,
+            selectionArgs,
+            "${MediaStore.Images.Media.DATE_MODIFIED} DESC"
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
+            val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+            val widthCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
+            val heightCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idCol)
+                val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                val name = cursor.getString(nameCol) ?: ""
+                val dateSec = cursor.getLong(dateCol)
+                val size = cursor.getLong(sizeCol)
+                val width = cursor.getInt(widthCol)
+                val height = cursor.getInt(heightCol)
+
+                val projectJson = runCatching {
+                    val sidecar = projectSidecarFile(context, name)
+                    if (sidecar.exists()) sidecar.readText(Charsets.UTF_8) else null
+                }.getOrNull()
+
+                list.add(
+                    Creation(
+                        id = contentUri.toString(),
+                        uri = contentUri.toString(),
+                        name = name,
+                        dateMillis = dateSec * 1000L,
+                        sizeBytes = size,
+                        width = width,
+                        height = height,
+                        kind = CreationKind.fromFileName(name),
+                        projectJson = projectJson
+                    )
                 )
             }
         }
-        result
+        list
     }
 
     actual suspend fun delete(creation: Creation): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val rows = context.contentResolver.delete(Uri.parse(creation.uri), null, null)
-            if (rows > 0) Result.success(Unit)
-            else Result.failure(IllegalStateException("This image was already removed."))
-        } catch (e: SecurityException) {
-            Result.failure(IllegalStateException("Couldn't delete this image. Remove it from your Gallery app instead."))
-        } catch (e: Exception) {
-            Result.failure(e)
+        runCatching {
+            val uri = Uri.parse(creation.uri)
+            val deleted = context.contentResolver.delete(uri, null, null)
+            if (deleted > 0) {
+                projectSidecarFile(context, creation.name).delete()
+                Unit
+            } else {
+                error("Could not delete creation: ${creation.name}")
+            }
         }
     }
 }
 
 @Composable
 actual fun rememberCreationsRepository(folder: String): CreationsRepository {
-    val appContext = LocalContext.current.applicationContext
-    return remember(appContext, folder) { CreationsRepository(appContext, folder) }
+    val context = LocalContext.current.applicationContext
+    return remember(context, folder) {
+        CreationsRepository(context, folder)
+    }
 }

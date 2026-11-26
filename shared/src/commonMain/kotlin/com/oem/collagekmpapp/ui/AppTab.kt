@@ -30,7 +30,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.oem.collagekmpapp.NeuColors
+import com.oem.collagekmpapp.SyncNeuSystemTheme
 import com.oem.collagekmpapp.model.Screen
 import com.oem.collagekmpapp.neumorphic
 import com.oem.collagekmpapp.neumorphicInset
@@ -58,6 +61,8 @@ fun AppBottomBar(
     val barShape = RoundedCornerShape(32.dp)
     val pillShape = RoundedCornerShape(24.dp)
     val innerPad = 8.dp
+    val haptic = LocalHapticFeedback.current
+    SyncNeuSystemTheme()   // bar colours follow "System" theme too
 
     Box(
         modifier = modifier
@@ -101,6 +106,8 @@ fun AppBottomBar(
                         selected = current == tab,
                         modifier = Modifier.weight(1f),
                         onClick = {
+                            // tactile tick on every tab tap (also when re-tapping the active tab)
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             if (current != tab) onNavigate(
                                 when (tab) {
                                     AppTab.Home -> Screen.Home

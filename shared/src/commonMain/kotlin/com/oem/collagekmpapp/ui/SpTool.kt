@@ -2,6 +2,7 @@ package com.oem.collagekmpapp.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -17,6 +18,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
@@ -42,6 +44,7 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -60,7 +63,14 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -109,6 +119,7 @@ import com.oem.collagekmpapp.FreestyleProject
 import com.oem.collagekmpapp.PhotoColorEngine
 import com.oem.collagekmpapp.USE_LEGACY_EXPORT_DIALOG
 import com.oem.collagekmpapp.UndoRedoActions
+import com.oem.collagekmpapp.BackHandler
 import com.oem.collagekmpapp.UnifiedExportScreen
 import com.oem.collagekmpapp.components.FluidSlider
 import com.oem.collagekmpapp.model.*
@@ -413,11 +424,34 @@ private fun Modifier.spPerspective(m: Matrix): Modifier = this.drawWithContent {
     withTransform({ transform(m) }) { this@drawWithContent.drawContent() }
 }
 
-private enum class SelParam(val label: String, val icon: ImageVector) {
-    BRIGHTNESS("Brightness", Icons.Default.WbSunny),
-    CONTRAST("Contrast", Icons.Default.Contrast),
-    SATURATION("Saturation", Icons.Default.Palette),
-    STRUCTURE("Structure", Icons.Default.Texture)
+private enum class SelParam(val label: String, val icon: ImageVector, val short: String) {
+    BRIGHTNESS("Brightness", Icons.Default.WbSunny, "B"),
+    CONTRAST("Contrast", Icons.Default.Contrast, "C"),
+    SATURATION("Saturation", Icons.Default.Palette, "S"),
+    STRUCTURE("Structure", Icons.Default.Texture, "St")
+}
+
+/** "+15" / "-8" / "0" for the pin badges. */
+private fun spSigned(v: Float): String {
+    val n = v.roundToInt()
+    return if (n > 0) "+$n" else "$n"
+}
+
+/** Angle with 0.5° precision, e.g. "-12.5°" / "3°". */
+private fun spFmtAngle(a: Float): String {
+    val halves = (a * 2f).roundToInt()
+    val whole = halves / 2
+    val sign = if (halves < 0 && whole == 0) "-" else ""
+    return if (halves % 2 == 0) "$sign$whole°" else "$sign$whole.5°"
+}
+
+/**
+ * Trash badge of a selective pin: on the ring at 45° (top-right), but never closer to the centre than [minPx]
+ * so it can't overlap the bullseye on small rings. Shared by drawing and hit-testing.
+ */
+private fun spPinTrashPos(center: Offset, ringPx: Float, minPx: Float): Offset {
+    val r = maxOf(ringPx, minPx)
+    return center + Offset(r * 0.7071f, -r * 0.7071f)
 }
 
 private fun SelectivePoint.valueOf(p: SelParam): Float = when (p) {
@@ -493,6 +527,111 @@ private fun SpHandle(pos: Offset, color: Color, icon: ImageVector, desc: String)
             .size(26.dp).clip(CircleShape).background(color),
         contentAlignment = Alignment.Center
     ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(14.dp)) }
+}
+
+/**
+ * Fine rotation wheel: a horizontal ruler (−45°…+45°) that you drag like a dial; output snaps to 0.5°.
+ * Ticks every 1°, mid ticks every 5°, labelled majors every 15°; a haptic tick at every 5° and when crossing 0°.
+ * [onActive] is true while the finger is on the wheel (drives the straightening grid).
+ */
+@Composable
+private fun SpRotationWheel(
+    angle: Float,
+    onAngle: (Float) -> Unit,
+    onActive: (Boolean) -> Unit,
+    onNudge: (Float) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val latestAngle by rememberUpdatedState(angle)
+    val latestOnAngle by rememberUpdatedState(onAngle)
+    val latestOnActive by rememberUpdatedState(onActive)
+    val pxPerDeg = with(LocalDensity.current) { 7.dp.toPx() }
+    val measurer = rememberTextMeasurer()
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Straighten: ${spFmtAngle(angle)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SpChip("−0.5°", false) { onNudge(-0.5f) }
+                SpChip("+0.5°", false) { onNudge(0.5f) }
+                SpChip("0° Reset", angle == 0f) { onNudge(-angle) }
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF0F172A))
+                .pointerInput(Unit) {
+                    var raw = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { raw = latestAngle; latestOnActive(true) },
+                        onDragEnd = { latestOnActive(false) },
+                        onDragCancel = { latestOnActive(false) },
+                        onHorizontalDrag = { change, dx ->
+                            change.consume()
+                            val before = latestAngle
+                            // ruler follows the finger: dragging left turns the photo clockwise (+)
+                            raw = (raw - dx / pxPerDeg).coerceIn(-45f, 45f)
+                            val snapped = (raw * 2f).roundToInt() / 2f
+                            if (snapped != before) {
+                                val crossedZero = (before < 0f && snapped >= 0f) || (before > 0f && snapped <= 0f)
+                                if (crossedZero || (snapped % 5f == 0f)) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                latestOnAngle(snapped)
+                            }
+                        }
+                    )
+                }
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val cx = size.width / 2f
+                val bottom = size.height - 6.dp.toPx()
+                for (d in -45..45) {
+                    val x = cx + (d - angle) * pxPerDeg
+                    if (x < -20f || x > size.width + 20f) continue
+                    val major = d % 15 == 0
+                    val mid = d % 5 == 0
+                    val len = size.height * when { major -> 0.42f; mid -> 0.30f; else -> 0.18f }
+                    val col = if (d == 0) Color(0xFF60A5FA)
+                    else Color.White.copy(alpha = if (major) 0.9f else if (mid) 0.6f else 0.35f)
+                    drawLine(col, Offset(x, bottom - len), Offset(x, bottom), if (major) 1.6.dp.toPx() else 1.dp.toPx())
+                    if (major) {
+                        val label = measurer.measure(AnnotatedString(if (d > 0) "+$d" else "$d"), style = TextStyle(fontSize = 9.sp, color = col))
+                        drawText(label, topLeft = Offset(x - label.size.width / 2f, 3.dp.toPx()))
+                    }
+                }
+                // fixed centre needle
+                drawLine(Color(0xFF3B82F6), Offset(cx, 4.dp.toPx()), Offset(cx, size.height - 2.dp.toPx()), 2.5.dp.toPx(), cap = StrokeCap.Round)
+                // soft edge fades so the ruler reads as a wheel
+                val fade = size.width * 0.18f
+                drawRect(Brush.horizontalGradient(listOf(Color(0xFF0F172A), Color.Transparent), startX = 0f, endX = fade), size = Size(fade, size.height))
+                drawRect(
+                    Brush.horizontalGradient(listOf(Color.Transparent, Color(0xFF0F172A)), startX = size.width - fade, endX = size.width),
+                    topLeft = Offset(size.width - fade, 0f), size = Size(fade, size.height)
+                )
+            }
+        }
+    }
+}
+
+/** Dense 9 x 9 straightening grid: dark halo + bright line so it reads on any photo. */
+private fun DrawScope.spDrawStraightenGrid(alpha: Float) {
+    val halo = Color.Black.copy(alpha = 0.45f * alpha)
+    val line = Color.White.copy(alpha = 0.9f * alpha)
+    val thin = 1.dp.toPx()
+    for (i in 1..8) {
+        val x = size.width * i / 9f
+        val y = size.height * i / 9f
+        drawLine(halo, Offset(x, 0f), Offset(x, size.height), thin * 2.2f)
+        drawLine(line, Offset(x, 0f), Offset(x, size.height), thin)
+        drawLine(halo, Offset(0f, y), Offset(size.width, y), thin * 2.2f)
+        drawLine(line, Offset(0f, y), Offset(size.width, y), thin)
+    }
+    // centre cross a bit stronger, for horizons
+    val accent = Color(0xFF60A5FA).copy(alpha = alpha)
+    drawLine(accent, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), thin * 1.4f)
+    drawLine(accent, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), thin * 1.4f)
 }
 
 /** Text / emoji overlay (the photo itself is rendered by [SpPhotoLayer]). */
@@ -731,6 +870,38 @@ fun SinglePhotoEditorScreen(
     var selParam by remember { mutableStateOf(SelParam.BRIGHTNESS) }
     var pointSeq by remember { mutableStateOf(0) }
 
+    // ---- straightening grid (view-only): visible while the rotation wheel is held, fades out 400 ms after release
+    var rotationActive by remember { mutableStateOf(false) }
+    var gridVisible by remember { mutableStateOf(false) }
+    var gridReleaseKey by remember { mutableStateOf(0) }
+    LaunchedEffect(gridReleaseKey) {
+        if (gridReleaseKey > 0) {
+            delay(400)
+            if (!rotationActive) gridVisible = false
+        }
+    }
+    val gridAlpha by animateFloatAsState(
+        targetValue = if (gridVisible) 1f else 0f,
+        animationSpec = tween(if (gridVisible) 120 else 300),
+        label = "straightenGrid"
+    )
+    /** Wheel pressed / released. */
+    fun onRotationActive(active: Boolean) {
+        rotationActive = active
+        if (active) gridVisible = true else gridReleaseKey += 1
+    }
+    /** ±0.5° / reset taps: show the grid briefly, then fade like a released drag. */
+    fun pulseGrid() {
+        gridVisible = true
+        gridReleaseKey += 1
+    }
+
+    // ---- lens blur ring: true while the finger is moving / pinching the focus zone (shows a live readout)
+    var lensAdjusting by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    val pinMeasurer = rememberTextMeasurer()
+    val trashPainter = rememberVectorPainter(Icons.Default.Delete)
+
     // ---- export
     var showExport by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
@@ -920,12 +1091,26 @@ fun SinglePhotoEditorScreen(
         }
     }
 
+    // ---------------------------------------------------------------- Unsaved-changes guardrail
+    // Top-bar arrow AND system back/gesture: exit directly when nothing is undoable, otherwise confirm first.
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val requestBack: () -> Unit = {
+        if (history.canUndo) showDiscardDialog = true else onBack()
+    }
+    BackHandler(enabled = LocalIsTopScreen.current) { requestBack() }
+    if (showDiscardDialog) {
+        DiscardChangesDialog(
+            onCancel = { showDiscardDialog = false },
+            onDiscard = { showDiscardDialog = false; onBack() }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("Photo Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = requestBack) { Icon(Icons.Default.ArrowBack, "Back") } },
                 actions = {
                     UndoRedoActions(history)
                     Button(
@@ -1007,7 +1192,16 @@ fun SinglePhotoEditorScreen(
                                     }
                                     SpHint("Drag the corners to crop, drag inside to move the frame.")
                                 } else {
-                                    SpSliderRow("Rotate: ${fineAngle.toInt()}°", fineAngle, -45f..45f) { fineAngle = it }
+                                    // fine rotation wheel (0.5° steps) – the straightening grid shows while it's held
+                                    SpRotationWheel(
+                                        angle = fineAngle,
+                                        onAngle = { fineAngle = it },
+                                        onActive = { onRotationActive(it) },
+                                        onNudge = { d ->
+                                            fineAngle = ((((fineAngle + d) * 2f).roundToInt()) / 2f).coerceIn(-45f, 45f)
+                                            pulseGrid()
+                                        }
+                                    )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         SpChip("Rotate 90°", false) { quarterTurns = (quarterTurns + 1) % 4 }
                                         SpChip("Flip ↔", flipH) { flipH = !flipH }
@@ -1140,7 +1334,7 @@ fun SinglePhotoEditorScreen(
                                         onValue = { v -> updatePoint(ap.id) { it.withValue(selParam, v) } }
                                     )
                                 } else {
-                                    SpHint("Tap the photo to drop a control point. Drag a point to move it, pinch to resize its circle.")
+                                    SpHint("Tap the photo to drop a control point. Drag a pin to move it, pinch to resize its ring, long-press (or tap its trash badge) to delete.")
                                 }
                             }
                             // ------------------------------------------------ 5b. VINTAGE
@@ -1203,7 +1397,7 @@ fun SinglePhotoEditorScreen(
                                     SpSliderRow("Clear zone: ${(l.clear * 100).toInt()}", l.clear * 100f, 4f..60f) { x -> setLens { it.copy(clear = x / 100f) } }
                                     SpSliderRow("Transition feather: ${(l.feather * 100).toInt()}", l.feather * 100f, 2f..50f) { x -> setLens { it.copy(feather = x / 100f) } }
                                     SpSliderRow("Blur intensity: ${l.amount.toInt()}", l.amount, 0f..100f) { x -> setLens { it.copy(amount = x) } }
-                                    SpHint("Drag on the photo to move the sharp zone, pinch to resize it.")
+                                    SpHint("Drag on the photo to move the focus ring, pinch to grow / shrink the sharp zone and feather together.")
                                 } else {
                                     SpHint("No lens blur yet. Pick Circular or Horizontal to keep a zone sharp and blur the rest.")
                                 }
@@ -1466,8 +1660,24 @@ fun SinglePhotoEditorScreen(
 
                             // ------------------------- selective: tap = new point, drag = move, pinch = resize circle
                             if (tool == SpTool.SELECTIVE) {
-                                val hitR = 30.dp.toPx()
+                                val hitR = 36.dp.toPx()
                                 val g0 = spGeoAt(w, h)
+
+                                // trash badge on the active pin ring -> delete it
+                                val ap0 = tools.selective.firstOrNull { it.id == activePointId }
+                                if (showPoints && ap0 != null) {
+                                    val tp = spPinTrashPos(g0.toCanvas(Offset(ap0.x, ap0.y)), ap0.radius * g0.pxPerBoxWidth, 34.dp.toPx())
+                                    if ((down.position - tp).getDistance() < 20.dp.toPx()) {
+                                        down.consume()
+                                        if (waitForUpOrCancellation() != null) {
+                                            tools = tools.copy(selective = tools.selective.filter { it.id != ap0.id })
+                                            activePointId = null
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        }
+                                        return@awaitEachGesture
+                                    }
+                                }
+
                                 val hitPt = tools.selective
                                     .map { it to (g0.toCanvas(Offset(it.x, it.y)) - down.position).getDistance() }
                                     .minByOrNull { it.second }
@@ -1475,6 +1685,29 @@ fun SinglePhotoEditorScreen(
                                 down.consume()
                                 if (hitPt != null) {
                                     activePointId = hitPt.id
+                                    // tap = select · hold still = long-press delete · move / pinch = drag the pin / resize its ring
+                                    val slop = viewConfiguration.touchSlop
+                                    var outcome = 0   // 0 = long press (timed out), 1 = released (tap), 2 = moving / pinching
+                                    withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                        while (true) {
+                                            val ev = awaitPointerEvent()
+                                            if (ev.changes.none { it.pressed }) { outcome = 1; break }
+                                            if (ev.changes.size >= 2 || (ev.changes[0].position - down.position).getDistance() > slop) {
+                                                outcome = 2; break
+                                            }
+                                        }
+                                    }
+                                    if (outcome == 0) {
+                                        tools = tools.copy(selective = tools.selective.filter { it.id != hitPt.id })
+                                        activePointId = null
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        do {
+                                            val ev = awaitPointerEvent()
+                                            ev.changes.forEach { it.consume() }
+                                        } while (ev.changes.any { it.pressed })
+                                        return@awaitEachGesture
+                                    }
+                                    if (outcome == 1) return@awaitEachGesture
                                     do {
                                         val ev = awaitPointerEvent()
                                         val zoom = ev.calculateZoom()
@@ -1526,22 +1759,30 @@ fun SinglePhotoEditorScreen(
                             if (tool == SpTool.LENS) {
                                 if (!tools.lens.on) return@awaitEachGesture
                                 down.consume()
-                                do {
-                                    val ev = awaitPointerEvent()
-                                    val zoom = ev.calculateZoom()
-                                    val pan = ev.calculatePan()
-                                    if (zoom != 1f || pan != Offset.Zero) {
-                                        val d = spGeoAt(w, h).panToBox(pan)
-                                        setLens {
-                                            it.copy(
-                                                cx = (it.cx + d.x).coerceIn(0f, 1f),
-                                                cy = (it.cy + d.y).coerceIn(0f, 1f),
-                                                clear = (it.clear * zoom).coerceIn(0.04f, 0.6f)
-                                            )
+                                lensAdjusting = true   // live readout + highlighted rings while the finger is down
+                                try {
+                                    do {
+                                        val ev = awaitPointerEvent()
+                                        val zoom = ev.calculateZoom()
+                                        val pan = ev.calculatePan()
+                                        if (zoom != 1f || pan != Offset.Zero) {
+                                            val d = spGeoAt(w, h).panToBox(pan)
+                                            setLens {
+                                                it.copy(
+                                                    cx = (it.cx + d.x).coerceIn(0f, 1f),
+                                                    cy = (it.cy + d.y).coerceIn(0f, 1f),
+                                                    // pinch scales the sharp zone AND the feather ring together
+                                                    // (same ranges as the Clear zone / Transition feather sliders)
+                                                    clear = (it.clear * zoom).coerceIn(0.04f, 0.6f),
+                                                    feather = (it.feather * zoom).coerceIn(0.02f, 0.5f)
+                                                )
+                                            }
+                                            ev.changes.forEach { if (it.positionChanged()) it.consume() }
                                         }
-                                        ev.changes.forEach { if (it.positionChanged()) it.consume() }
-                                    }
-                                } while (ev.changes.any { it.pressed })
+                                    } while (ev.changes.any { it.pressed })
+                                } finally {
+                                    lensAdjusting = false
+                                }
                                 return@awaitEachGesture
                             }
 
@@ -1730,6 +1971,11 @@ fun SinglePhotoEditorScreen(
                             }
                         }
 
+                        // ---------------- straightening grid (fine rotation): 9 x 9, fades out after the wheel is released
+                        if (gridAlpha > 0.01f && !editingCrop) {
+                            Canvas(Modifier.fillMaxSize()) { spDrawStraightenGrid(gridAlpha) }
+                        }
+
                         // ---------------- crop frame overlay
                         if (editingCrop) {
                             Canvas(Modifier.fillMaxSize()) {
@@ -1755,45 +2001,120 @@ fun SinglePhotoEditorScreen(
 
                         // ---------------- selective control-point circles (the eye button hides them)
                         if (tool == SpTool.SELECTIVE && showPoints) {
+                            // Target pin rings: dashed radius ring + bullseye + "B: +15" badge (current parameter);
+                            // the active pin also gets a trash badge on its ring (tap it, or long-press the pin, to delete).
                             Canvas(Modifier.fillMaxSize()) {
                                 val g = spGeoAt(size.width, size.height)
+                                val dash = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 6.dp.toPx()))
+                                val blue = Color(0xFF2563EB)
+                                val lightBlue = Color(0xFF60A5FA)
                                 tools.selective.forEach { p ->
                                     val c = g.toCanvas(Offset(p.x, p.y))
                                     val r = p.radius * g.pxPerBoxWidth
                                     val active = p.id == activePointId
-                                    val ring = if (active) Color(0xFF2563EB) else Color.White
-                                    drawCircle(Color.Black.copy(alpha = 0.35f), r + 1.5f, c, style = Stroke(3.dp.toPx()))
-                                    drawCircle(ring, r, c, style = Stroke(2.dp.toPx()))
-                                    drawCircle(Color.White, 8.dp.toPx(), c)
+
+                                    // outer radius ring: dark halo for contrast + blue dashed ring
+                                    drawCircle(Color.Black.copy(alpha = 0.35f), r, c, style = Stroke(4.dp.toPx()))
                                     drawCircle(
-                                        if (active) Color(0xFF2563EB) else if (p.isNeutral) Color(0xFF94A3B8) else Color(0xFF22C55E),
-                                        5.5.dp.toPx(), c
+                                        if (active) blue else lightBlue, r, c,
+                                        style = Stroke(if (active) 2.5.dp.toPx() else 1.75.dp.toPx(), pathEffect = dash)
                                     )
+
+                                    // bullseye
+                                    drawCircle(Color.Black.copy(alpha = 0.3f), 13.dp.toPx(), c)
+                                    drawCircle(Color.White, 12.dp.toPx(), c)
+                                    drawCircle(
+                                        if (active) blue else if (p.isNeutral) Color(0xFF94A3B8) else Color(0xFF22C55E),
+                                        8.dp.toPx(), c
+                                    )
+                                    drawCircle(Color.White, 3.dp.toPx(), c)
+
+                                    // active-parameter badge under the bullseye, e.g. "B: +15"
+                                    val label = pinMeasurer.measure(
+                                        AnnotatedString("${selParam.short}: ${spSigned(p.valueOf(selParam))}"),
+                                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    )
+                                    val padX = 6.dp.toPx()
+                                    val padY = 2.dp.toPx()
+                                    val bw = label.size.width + padX * 2
+                                    val bh = label.size.height + padY * 2
+                                    val btl = Offset(c.x - bw / 2f, c.y + 16.dp.toPx())
+                                    drawRoundRect(if (active) blue else Color(0xCC0F172A), btl, Size(bw, bh), CornerRadius(bh / 2f))
+                                    drawText(label, topLeft = Offset(btl.x + padX, btl.y + padY))
+
+                                    // trash badge (active pin only) – same position as the hit test in the gesture code
+                                    if (active) {
+                                        val tp = spPinTrashPos(c, r, 34.dp.toPx())
+                                        val icon = 14.dp.toPx()
+                                        drawCircle(Color.White, 13.dp.toPx(), tp)
+                                        drawCircle(Color(0xFFEF4444), 11.dp.toPx(), tp)
+                                        translate(tp.x - icon / 2f, tp.y - icon / 2f) {
+                                            with(trashPainter) { draw(Size(icon, icon), colorFilter = ColorFilter.tint(Color.White)) }
+                                        }
+                                    }
                                 }
                             }
                         }
 
                         // ---------------- lens blur guide: clear zone (solid) + feather ring (dashed)
                         if (tool == SpTool.LENS && tools.lens.on) {
+                            // Bokeh focus ring: solid inner ring = 100 % sharp zone (clear), dashed outer ring = end of the
+                            // feather transition (clear + feather). Drag anywhere to move it, pinch to scale both rings.
                             Canvas(Modifier.fillMaxSize()) {
                                 val g = spGeoAt(size.width, size.height)
                                 val l = tools.lens
                                 val c = g.toCanvas(Offset(l.cx, l.cy))
                                 val dash = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))
+                                val halo = Color.Black.copy(alpha = 0.35f)
+                                val accent = Color(0xFF60A5FA)
                                 rotate(g.angle, c) {
+                                    fun radii(frac: Float) = Offset(frac * g.dw * l.axisX * g.sx, frac * g.dw * l.axisY * g.sy)
                                     fun ring(frac: Float, color: Color, width: Float, effect: PathEffect?) {
-                                        val rx = frac * g.dw * l.axisX * g.sx
-                                        val ry = frac * g.dw * l.axisY * g.sy
+                                        val r = radii(frac)
                                         drawOval(
-                                            color, topLeft = Offset(c.x - rx, c.y - ry), size = Size(rx * 2f, ry * 2f),
+                                            color, topLeft = Offset(c.x - r.x, c.y - r.y), size = Size(r.x * 2f, r.y * 2f),
                                             style = Stroke(width, pathEffect = effect)
                                         )
                                     }
-                                    ring(l.clear, Color.White, 2.dp.toPx(), null)
-                                    ring(l.clear + l.feather, Color.White.copy(alpha = 0.8f), 1.5.dp.toPx(), dash)
+                                    // faint highlight of the sharp zone while adjusting
+                                    if (lensAdjusting) {
+                                        val r = radii(l.clear)
+                                        drawOval(Color.White.copy(alpha = 0.10f), Offset(c.x - r.x, c.y - r.y), Size(r.x * 2f, r.y * 2f))
+                                    }
+                                    // inner solid ring (sharp zone)
+                                    ring(l.clear, halo, 4.dp.toPx(), null)
+                                    ring(l.clear, if (lensAdjusting) accent else Color.White, 2.dp.toPx(), null)
+                                    // outer dashed ring (feather boundary)
+                                    ring(l.clear + l.feather, halo, 3.dp.toPx(), dash)
+                                    ring(l.clear + l.feather, Color.White.copy(alpha = 0.85f), 1.5.dp.toPx(), dash)
+                                    // bokeh dots spaced around the feather ring
+                                    val outer = radii(l.clear + l.feather)
+                                    for (k in 0 until 12) {
+                                        val a = (k / 12f) * 2f * PI.toFloat()
+                                        val p = Offset(c.x + outer.x * cos(a), c.y + outer.y * sin(a))
+                                        drawCircle(Color.White.copy(alpha = 0.55f), 3.dp.toPx(), p)
+                                        drawCircle(halo, 3.dp.toPx(), p, style = Stroke(1.dp.toPx()))
+                                    }
                                 }
+                                // centre handle with crosshair
+                                val arm = 11.dp.toPx()
+                                drawLine(Color.White, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), 1.5.dp.toPx())
+                                drawLine(Color.White, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), 1.5.dp.toPx())
                                 drawCircle(Color.White, 6.dp.toPx(), c)
                                 drawCircle(Color(0xFF2563EB), 4.dp.toPx(), c)
+                            }
+                            // live readout while dragging / pinching (non-interactive, so gestures pass through)
+                            if (lensAdjusting) {
+                                Box(
+                                    Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+                                        .background(Color(0xCC0F172A), RoundedCornerShape(50))
+                                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        "Sharp ${(tools.lens.clear * 100).roundToInt()}  ·  Feather ${(tools.lens.feather * 100).roundToInt()}",
+                                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White
+                                    )
+                                }
                             }
                         }
 

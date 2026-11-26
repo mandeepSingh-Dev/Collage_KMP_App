@@ -25,6 +25,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.oem.collagekmpapp.AppSettings
+import com.oem.collagekmpapp.NeuColors
+import com.oem.collagekmpapp.SyncNeuSystemTheme
 import com.oem.collagekmpapp.rememberGalleryPicker
 import com.oem.collagekmpapp.model.Screen
 
@@ -34,6 +39,11 @@ fun HomeScreen(
 ) {
     val scrollState = rememberScrollState()
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Theme: keeps "System" mode in sync with the OS, and recomposes when AppSettings.theme changes
+    SyncNeuSystemTheme()
+    val isDarkTheme = NeuColors.isDark
+    val haptic = LocalHapticFeedback.current
 
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -92,7 +102,8 @@ fun HomeScreen(
             onNavigate(
                 Screen.Editor(
                     layoutId = template.layoutIdFor(selectedUris.size),
-                    selectedPhotos = selectedUris,
+                    // smart order: first picked photo -> the template's featured (largest) slot
+                    selectedPhotos = template.orderPhotosForSlots(selectedUris),
                     templateId = template.id
                 )
             )
@@ -100,7 +111,7 @@ fun HomeScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFF4F6F9),
+        containerColor = NeuColors.Background,   // light value is the original #F4F6F9
         snackbarHost = {
             if (errorMessage != null) {
                 Snackbar(
@@ -125,7 +136,7 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFFF4F6F9))
+                    .background(NeuColors.Background)
                     .padding(innerPadding)
                     .verticalScroll(scrollState)
                     .padding(horizontal = 20.dp, vertical = 16.dp),
@@ -141,19 +152,27 @@ fun HomeScreen(
                         text = "Collage Studio",
                         fontSize = 26.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF1E293B)
+                        color = NeuColors.TextPrimary   // light value is the original #1E293B
                     )
+                    // Theme toggle: observes AppSettings.theme (via NeuColors.isDark) and flips Light <-> Dark.
+                    // Dark -> Sun icon (tap for light), Light -> Moon icon (tap for dark).
                     Surface(
                         shape = CircleShape,
-                        color = Color.White,
+                        color = if (isDarkTheme) Color(0xFF334155) else Color.White,
                         shadowElevation = 4.dp,
-                        modifier = Modifier.size(46.dp)
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                AppSettings.updateTheme(if (isDarkTheme) "Light" else "Dark")
+                            }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Default.WbSunny,
-                                contentDescription = "Theme",
-                                tint = Color(0xFF475569),
+                                imageVector = if (isDarkTheme) Icons.Default.WbSunny else Icons.Default.NightsStay,
+                                contentDescription = if (isDarkTheme) "Switch to light theme" else "Switch to dark theme",
+                                tint = if (isDarkTheme) Color(0xFFFDE68A) else Color(0xFF475569),
                                 modifier = Modifier.size(22.dp)
                             )
                         }

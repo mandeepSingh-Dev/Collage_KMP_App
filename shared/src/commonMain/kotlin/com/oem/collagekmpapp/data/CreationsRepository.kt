@@ -28,7 +28,11 @@ enum class CreationKind(val label: String, val filePrefix: String) {
     }
 }
 
-/** One exported image. [uri] is what Coil, the sharer and the editors all accept. */
+/**
+ * One exported image. [uri] is what Coil, the sharer and the editors all accept.
+ * [projectJson] = contents of the matching project sidecar (`Collage_1764000000000.json` for
+ * `Collage_1764000000000.png`) when the export saved one -> enables "Re-edit Project". See CreationProject.
+ */
 data class Creation(
     val id: String,
     val uri: String,
@@ -37,7 +41,8 @@ data class Creation(
     val sizeBytes: Long,
     val width: Int,
     val height: Int,
-    val kind: CreationKind
+    val kind: CreationKind,
+    val projectJson: String? = null
 )
 
 /** Reads / deletes the images exported into the app's save folder (default `Pictures/CollageStudio`). */

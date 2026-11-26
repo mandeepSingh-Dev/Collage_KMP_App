@@ -165,9 +165,16 @@ object FreestyleRenderer {
         fx: com.oem.collagekmpapp.PhotoEffects,
         exportScale: Float
     ) {
+        // new frame styles with their own geometry
+        when (item.frame) {
+            PhotoFrame.FILM -> { drawFilmItem(canvas, item, bmp, rect, canvasW, matrix, fx, exportScale); return }
+            PhotoFrame.TORN -> { drawTornItem(canvas, item, bmp, rect, matrix, fx, exportScale); return }
+            else -> Unit
+        }
         val iw = rect.width()
         val radius = item.cornerUnits * canvasW
-        val polaroid = item.frame == PhotoFrame.POLAROID
+        // TAPE = the polaroid card + tape strips drawn on top (see the end of this function)
+        val polaroid = item.frame == PhotoFrame.POLAROID || item.frame == PhotoFrame.TAPE
 
         if (item.shadow) {
             val sp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -189,6 +196,21 @@ object FreestyleRenderer {
         }
         val innerRadius = if (polaroid) 0f else radius
 
+        drawPhotoInto(canvas, bmp, inner, innerRadius, matrix, fx, exportScale)
+
+        if (item.frame == PhotoFrame.TAPE) drawTape(canvas, rect)
+    }
+
+    /** Centre-crops the photo into [inner] (rounded by [innerRadius]) with the filter / effects look. Unchanged original logic. */
+    private fun drawPhotoInto(
+        canvas: Canvas,
+        bmp: Bitmap?,
+        inner: RectF,
+        innerRadius: Float,
+        matrix: FloatArray?,
+        fx: com.oem.collagekmpapp.PhotoEffects,
+        exportScale: Float
+    ) {
         canvas.save()
         canvas.clipPath(Path().apply { addRoundRect(inner, innerRadius, innerRadius, Path.Direction.CW) })
         if (bmp != null) {
@@ -205,6 +227,91 @@ object FreestyleRenderer {
             canvas.drawRect(inner, Paint().apply { color = Color.LTGRAY })
         }
         canvas.restore()
+    }
+
+    /** Photo window of a frame, from the shared [insets] (fractions of the item width). */
+    private fun innerRectFor(item: FreestyleItem, rect: RectF): RectF {
+        val iw = rect.width()
+        val ins = item.frame.insets()
+        return RectF(
+            rect.left + ins.side * iw, rect.top + ins.top * iw,
+            rect.right - ins.side * iw, rect.bottom - ins.bottom * iw
+        )
+    }
+
+    private fun shadowPaint(iw: Float, fill: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = fill
+        setShadowLayer(0.025f * iw, 0f, 0.012f * iw, Color.argb(90, 0, 0, 0))
+    }
+
+    /** Two translucent tape strips over the top corners (geometry from tapeStrips()). */
+    private fun drawTape(canvas: Canvas, rect: RectF) {
+        val tape = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FreestyleItem.TAPE_COLOR.toInt() }
+        val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = FreestyleItem.TAPE_EDGE_COLOR.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = rect.width() * 0.004f
+        }
+        tapeStrips(rect.width(), rect.height()).forEach { t ->
+            val cx = rect.left + t.cx
+            val cy = rect.top + t.cy
+            canvas.save()
+            canvas.rotate(t.angle, cx, cy)
+            val r = RectF(cx - t.length / 2f, cy - t.thickness / 2f, cx + t.length / 2f, cy + t.thickness / 2f)
+            canvas.drawRect(r, tape)
+            canvas.drawRect(r, edge)
+            canvas.restore()
+        }
+    }
+
+    /** 35 mm film strip: dark frame with real sprocket-hole cut-outs (even-odd path), photo in the window. */
+    private fun drawFilmItem(
+        canvas: Canvas,
+        item: FreestyleItem,
+        bmp: Bitmap?,
+        rect: RectF,
+        canvasW: Float,
+        matrix: FloatArray?,
+        fx: com.oem.collagekmpapp.PhotoEffects,
+        exportScale: Float
+    ) {
+        val iw = rect.width()
+        val radius = item.cornerUnits * canvasW
+        val inner = innerRectFor(item, rect)
+        val framePath = Path().apply {
+            fillType = Path.FillType.EVEN_ODD
+            addRoundRect(rect, radius, radius, Path.Direction.CW)
+            addRect(inner, Path.Direction.CW)
+            filmSprocketHoles(iw, rect.height()).forEach { h ->
+                addRoundRect(RectF(rect.left + h[0], rect.top + h[1], rect.left + h[2], rect.top + h[3]), h[4], h[4], Path.Direction.CW)
+            }
+        }
+        if (item.shadow) canvas.drawPath(framePath, shadowPaint(iw, FreestyleItem.FILM_COLOR.toInt()))
+        drawPhotoInto(canvas, bmp, inner, 0f, matrix, fx, exportScale)
+        canvas.drawPath(framePath, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = FreestyleItem.FILM_COLOR.toInt() })
+    }
+
+    /** White paper with a jagged torn outline (tornPaperOutline(), seeded by the item id), photo inside. */
+    private fun drawTornItem(
+        canvas: Canvas,
+        item: FreestyleItem,
+        bmp: Bitmap?,
+        rect: RectF,
+        matrix: FloatArray?,
+        fx: com.oem.collagekmpapp.PhotoEffects,
+        exportScale: Float
+    ) {
+        val iw = rect.width()
+        val pts = tornPaperOutline(iw, rect.height(), item.id.hashCode())
+        val paper = Path().apply {
+            moveTo(rect.left + pts[0], rect.top + pts[1])
+            var i = 2
+            while (i < pts.size) { lineTo(rect.left + pts[i], rect.top + pts[i + 1]); i += 2 }
+            close()
+        }
+        if (item.shadow) canvas.drawPath(paper, shadowPaint(iw, Color.WHITE))
+        canvas.drawPath(paper, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+        drawPhotoInto(canvas, bmp, innerRectFor(item, rect), 0f, matrix, fx, exportScale)
     }
 
     private fun drawEmoji(canvas: Canvas, item: FreestyleItem, iw: Float) {

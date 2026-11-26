@@ -65,6 +65,22 @@ private fun exportCutout(context: Context, uriStr: String, strokes: List<BgMaskS
             else mc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             return@forEach
         }
+        // Magic Wand / AI Auto-Cutout region: fill every normalized rect with the same erase / restore mode
+        s.rects?.let { r ->
+            val regionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.FILL
+                xfermode = if (s.restore) replace else clear
+            }
+            val region = Path()
+            var i = 0
+            while (i + 3 < r.size) {
+                region.addRect(r[i] * w, r[i + 1] * h, r[i + 2] * w, r[i + 3] * h, Path.Direction.CW)
+                i += 4
+            }
+            mc.drawPath(region, regionPaint)
+            return@forEach
+        }
         if (s.points.isEmpty()) return@forEach
         val widthPx = s.widthRatio * w
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -96,13 +112,40 @@ private fun exportCutout(context: Context, uriStr: String, strokes: List<BgMaskS
     return "Pictures/CollageStudio"
 }
 
-private fun decodeUpright(context: Context, uri: Uri): Bitmap? {
+/**
+ * Pixel loader for Magic Wand / AI Auto-Cutout: the SAME upright decode as the exporter (so regions line up with the
+ * export), downscaled to [maxSide] on its longest side.
+ */
+@Composable
+actual fun rememberPhotoPixelLoader(): PhotoPixelLoader {
+    val context = LocalContext.current
+    return remember(context) {
+        object : PhotoPixelLoader {
+            override suspend fun load(uri: String, maxSide: Int): MaskPixels? = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = decodeUpright(context, Uri.parse(uri), maxSide * 2) ?: return@runCatching null
+                    val scale = minOf(1f, maxSide.toFloat() / maxOf(src.width, src.height))
+                    val bw = maxOf(1, (src.width * scale).toInt())
+                    val bh = maxOf(1, (src.height * scale).toInt())
+                    val small = if (bw != src.width || bh != src.height) Bitmap.createScaledBitmap(src, bw, bh, true) else src
+                    val px = IntArray(bw * bh)
+                    small.getPixels(px, 0, bw, 0, 0, bw, bh)
+                    if (small !== src) small.recycle()
+                    src.recycle()
+                    MaskPixels(bw, bh, px)
+                }.getOrNull()
+            }
+        }
+    }
+}
+
+private fun decodeUpright(context: Context, uri: Uri, maxSide: Int = MAX_SIDE): Bitmap? {
     val cr = context.contentResolver
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
 
     var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_SIDE) sample *= 2
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
 
     val opts = BitmapFactory.Options().apply {
         inSampleSize = sample

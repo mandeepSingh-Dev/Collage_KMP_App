@@ -248,19 +248,37 @@ fun BoxScope.ResizeHandle(
             .pointerInput(index, edge) {
                 var startSlots: List<Slot> = emptyList()
                 var totalPx = 0f
+                // haptic "snap" tracking (feedback only – slot geometry is unchanged)
+                var wasClamped = false
+                var lastSideOfCenter = false
                 detectDragGestures(
                     onDragStart = {
                         startSlots = latestSlots()
                         totalPx = 0f
+                        wasClamped = false
+                        lastSideOfCenter = startSlots.getOrNull(index)?.edgeValue(edge)?.let { it > 0.5f } ?: false
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         totalPx += if (vertical) dragAmount.x else dragAmount.y
                         if (startSlots.isNotEmpty()) {
-                            latestOnChanged(
-                                resizeDividerSynced(startSlots, index, edge, totalPx / latestSize)
-                            )
+                            val requested = totalPx / latestSize
+                            val newSlots = resizeDividerSynced(startSlots, index, edge, requested)
+                            latestOnChanged(newSlots)
+
+                            val newEdge = newSlots[index].edgeValue(edge)
+                            val moved = newEdge - startSlots[index].edgeValue(edge)
+
+                            // 1) snapped against a limit (MIN_SLOT_FRACTION or the collage border)
+                            val clamped = abs(moved - requested) > 0.002f
+                            if (clamped && !wasClamped) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            wasClamped = clamped
+
+                            // 2) light detent when the divider crosses the even-split (50 %) line
+                            val side = newEdge > 0.5f
+                            if (side != lastSideOfCenter) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            lastSideOfCenter = side
                         }
                     },
                 )

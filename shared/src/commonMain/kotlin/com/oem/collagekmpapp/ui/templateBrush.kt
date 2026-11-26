@@ -25,6 +25,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -34,7 +36,12 @@ import com.oem.collagekmpapp.NeuColors
 import com.oem.collagekmpapp.data.LayoutRepository
 import com.oem.collagekmpapp.data.TemplateCategory
 import com.oem.collagekmpapp.data.TemplateItem
+import com.oem.collagekmpapp.data.TemplatePhotoFilter
 import com.oem.collagekmpapp.data.TemplateRepository
+import com.oem.collagekmpapp.rememberKeyValueStore
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import com.oem.collagekmpapp.data.TemplateThumbStyle
 import com.oem.collagekmpapp.model.ProjectOverlayItem
 import com.oem.collagekmpapp.neumorphic
@@ -57,6 +64,7 @@ fun TemplateCategoryChips(
     onSelect: (TemplateCategory) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     Row(
         modifier = modifier
             .horizontalScroll(rememberScrollState())
@@ -74,7 +82,10 @@ fun TemplateCategoryChips(
                     )
                     .then(if (isSel) Modifier.border(1.5.dp, NeuColors.Accent, shape) else Modifier)
                     .clip(shape)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onSelect(cat) }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(cat)
+                    }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -89,6 +100,67 @@ fun TemplateCategoryChips(
             }
         }
     }
+}
+
+/** Photo-count filter chips (All Photos, 2, 3, 4+) shown under the category chips. */
+@Composable
+fun TemplatePhotoCountChips(
+    selected: TemplatePhotoFilter,
+    onSelect: (TemplatePhotoFilter) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    Row(
+        modifier = modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 4.dp, horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        TemplatePhotoFilter.entries.forEach { f ->
+            val isSel = f == selected
+            val shape = RoundedCornerShape(50)
+            Box(
+                modifier = Modifier
+                    .then(if (isSel) Modifier.neumorphicInset(shape) else Modifier.neumorphic(shape, elevation = 3.dp))
+                    .then(if (isSel) Modifier.border(1.2.dp, NeuColors.Accent, shape) else Modifier)
+                    .clip(shape)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(f)
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    f.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    color = if (isSel) NeuColors.Accent else NeuColors.TextSecondary
+                )
+            }
+        }
+    }
+}
+
+/** Confirmation before deleting one of the user's own presets. */
+@Composable
+private fun DeletePresetDialog(template: TemplateItem, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete preset?") },
+        text = { Text("“${template.title}” will be removed from My Presets.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Delete", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+/** Shown when the current filters match nothing (e.g. My Presets before anything was saved). */
+@Composable
+private fun TemplatesEmptyHint(category: TemplateCategory, modifier: Modifier = Modifier) {
+    Text(
+        if (category == TemplateCategory.Custom)
+            "No presets yet. Open a collage and tap the ★ Save as Template button to keep its look here."
+        else "No templates match this photo count.",
+        fontSize = 12.sp, color = NeuColors.TextSecondary,
+        modifier = modifier.padding(horizontal = 8.dp, vertical = 16.dp)
+    )
 }
 
 /** Text + emoji decorations of a template, positioned from the normalised preset. */
@@ -185,7 +257,9 @@ fun TemplateCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
-    thumbHeight: Dp = 190.dp
+    thumbHeight: Dp = 190.dp,
+    /** Non-null for the user's own presets: shows a small delete badge on the thumbnail. */
+    onDelete: (() -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(20.dp)
     val width = thumbHeight * template.aspect()
@@ -199,7 +273,21 @@ fun TemplateCard(
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        TemplateThumbnail(template, thumbHeight)
+        Box {
+            TemplateThumbnail(template, thumbHeight)
+            if (onDelete != null) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(5.dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .clickable(onClick = onDelete),
+                    contentAlignment = Alignment.Center
+                ) { Text("✕", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold) }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Text(template.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NeuColors.TextPrimary, maxLines = 1)
         Text(
@@ -217,26 +305,48 @@ fun TemplatesSection(
     modifier: Modifier = Modifier
 ) {
     var category by remember { mutableStateOf(TemplateCategory.All) }
-    val items = remember(category) { TemplateRepository.byCategory(category) }
+    var photoFilter by remember { mutableStateOf(TemplatePhotoFilter.All) }
+    var pendingDelete by remember { mutableStateOf<TemplateItem?>(null) }
+    // loads saved presets once (idempotent)
+    val kv = rememberKeyValueStore()
+    remember(kv) { TemplateRepository.attach(kv); true }
+    // not remembered: reading the preset list here keeps the row live when a preset is saved / deleted
+    val items = TemplateRepository.byCategoryAndPhotoCount(category, photoFilter)
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Templates", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1E293B))
-            Text("${items.size} designs", fontSize = 12.sp, color = Color(0xFF64748B))
+            // NeuColors light values are the original #1E293B / #64748B; they turn light in dark mode
+            Text("Templates", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = NeuColors.TextPrimary)
+            Text("${items.size} designs", fontSize = 12.sp, color = NeuColors.TextSecondary)
         }
         Spacer(Modifier.height(6.dp))
         TemplateCategoryChips(selected = category, onSelect = { category = it })
-        Spacer(Modifier.height(10.dp))
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(items, key = { it.id }) { t ->
-                TemplateCard(template = t, onClick = { onTemplateClick(t) })
+        TemplatePhotoCountChips(selected = photoFilter, onSelect = { photoFilter = it })
+        Spacer(Modifier.height(6.dp))
+        if (items.isEmpty()) {
+            TemplatesEmptyHint(category)
+        } else {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(items, key = { it.id }) { t ->
+                    TemplateCard(
+                        template = t,
+                        onClick = { onTemplateClick(t) },
+                        onDelete = if (t.category == TemplateCategory.Custom) ({ pendingDelete = t }) else null
+                    )
+                }
             }
+        }
+    }
+    pendingDelete?.let { t ->
+        DeletePresetDialog(t, onDismiss = { pendingDelete = null }) {
+            TemplateRepository.removeCustom(t.id)
+            pendingDelete = null
         }
     }
 }
@@ -249,22 +359,40 @@ fun TemplatePicker(
     modifier: Modifier = Modifier
 ) {
     var category by remember { mutableStateOf(TemplateCategory.All) }
-    val items = remember(category) { TemplateRepository.byCategory(category) }
+    var photoFilter by remember { mutableStateOf(TemplatePhotoFilter.All) }
+    var pendingDelete by remember { mutableStateOf<TemplateItem?>(null) }
+    val kv = rememberKeyValueStore()
+    remember(kv) { TemplateRepository.attach(kv); true }
+    val items = TemplateRepository.byCategoryAndPhotoCount(category, photoFilter)
     Column(modifier = modifier) {
         TemplateCategoryChips(selected = category, onSelect = { category = it })
+        TemplatePhotoCountChips(selected = photoFilter, onSelect = { photoFilter = it })
         Spacer(Modifier.height(8.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(6.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            items(items, key = { it.id }) { t ->
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth()) {
-                    TemplateCard(t, onClick = { onSelect(t) }, selected = t.id == selectedId, thumbHeight = 130.dp)
+        if (items.isEmpty()) {
+            TemplatesEmptyHint(category)
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(6.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(items, key = { it.id }) { t ->
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth()) {
+                        TemplateCard(
+                            t, onClick = { onSelect(t) }, selected = t.id == selectedId, thumbHeight = 130.dp,
+                            onDelete = if (t.category == TemplateCategory.Custom) ({ pendingDelete = t }) else null
+                        )
+                    }
                 }
             }
+        }
+    }
+    pendingDelete?.let { t ->
+        DeletePresetDialog(t, onDismiss = { pendingDelete = null }) {
+            TemplateRepository.removeCustom(t.id)
+            pendingDelete = null
         }
     }
 }
@@ -275,13 +403,15 @@ fun TemplateLivePreview(template: TemplateItem, photos: List<String>, modifier: 
     val repo = remember { LayoutRepository() }
     val count = photos.size.coerceAtLeast(1)
     val layoutId = remember(template.id, count) { template.layoutIdFor(count, repo) }
+    // first picked photo -> featured (largest) slot, same order the editor will receive
+    val orderedPhotos = remember(template.id, photos) { template.orderPhotosForSlots(photos, repo) }
     BoxWithConstraints(modifier = modifier.aspectRatio(template.aspect()).clip(RoundedCornerShape(16.dp))) {
         val w = maxWidth
         val h = maxHeight
         Box(modifier = Modifier.fillMaxSize().background(templateBrush(template)))
         RenderCollageLayout(
             layoutId = layoutId,
-            photos = photos,
+            photos = orderedPhotos,
             spacing = w * template.preset.innerSpacingRatio,
             cornerRadius = w * template.preset.cornerRadiusRatio,
             filterPreset = template.preset.filterPreset,
